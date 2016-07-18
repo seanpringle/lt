@@ -1,0 +1,3 @@
+*.o
+lt
+test.lua
