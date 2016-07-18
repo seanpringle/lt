@@ -68,6 +68,27 @@ stuff[#stuff] = 4
 
 The `[]` notation plays funny with Lua `[[...]]` strings. Adding spaces is a workaround, but feels wrong, so `[[...]]` isn't implemented yet.
 
+## 0-based indexing
+
+Lua's 1-based indexing only seemed a bother when interacting with other stuff in the C-derived ecosystem, but there's a lot of that around. This affects the `array` type and strings.
+
+## Integer 0 is false
+
+Lua treats only `nil` and `false` as false. LT adds `0` to the mix.
+
+## Tables can store `nil`
+
+```lua
+stuff = { a = 1, b = nil }
+print(stuff)
+```
+
+```
+{a: 1, b: nil}
+```
+
+Obviously this means LT can't delete table items by setting them to `nil`, as Lua does. Still thinking about this...
+
 ## Assignment as expression
 
 ```lua
