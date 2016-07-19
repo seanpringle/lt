@@ -36,10 +36,13 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "map.h"
 #include "lt.h"
 
+#define VEC_STEP 32
+
 vec_t*
 vec_alloc ()
 {
   vec_count++;
+  vec_created++;
   vec_t *vec = arena_alloc(vecs, sizeof(vec_t));
 
   ensure(vec)
@@ -47,7 +50,7 @@ vec_alloc ()
     stacktrace();
     errorf("arena_alloc vecs");
   }
-  vec->items = malloc(sizeof(void*) * 32);
+  vec->items = heap_alloc(sizeof(void*) * VEC_STEP);
   vec->count = 0;
   return vec;
 }
@@ -60,8 +63,8 @@ vec_ins (vec_t *vec, int index)
 
   vec->count++;
 
-  if (vec->count % 32 == 0)
-    vec->items = realloc(vec->items, (vec->count + 32) * sizeof(void*));
+  if (vec->count % VEC_STEP == 0)
+    vec->items = heap_realloc(vec->items, sizeof(void*) * (vec->count + VEC_STEP));
 
   memmove(&vec->items[index+1], &vec->items[index], (vec->count - index - 1) * sizeof(void*));
   vec->items[index] = NULL;
@@ -119,7 +122,7 @@ vec_empty (vec_t *vec)
 {
   for (int i = 0; i < vec->count; i++)
     discard(vec->items[i]);
-  free(vec->items);
+  heap_free(vec->items);
   memset(vec, 0, sizeof(vec_t));
   return vec;
 }
@@ -139,6 +142,7 @@ vec_decref (vec_t *vec)
     vec_empty(vec);
     arena_free(vecs, vec);
     vec_count--;
+    vec_destroyed++;
     vec = NULL;
   }
   return vec;
@@ -147,13 +151,22 @@ vec_decref (vec_t *vec)
 char*
 vec_char (vec_t *vec)
 {
+  int count = vec->count;
+
   push(strf("["));
 
-  for (int i = 0; i < vec->count; i++)
+  for (int i = 0; i < count; i++)
   {
-    push(to_char(vec_get(vec, i)[0]));
+    if (is_vec(vec_get(vec, i)[0]))
+      push(strf("vec[]"));
+    else
+    if (is_map(vec_get(vec, i)[0]))
+      push(strf("map[]"));
+    else
+      push(to_char(vec_get(vec, i)[0]));
+
     op_concat();
-    if (i < vec->count-1)
+    if (i < count-1)
     {
       push(strf(", "));
       op_concat();

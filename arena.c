@@ -26,6 +26,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 #include "arena.h"
 
@@ -137,4 +138,60 @@ arena_free (void *pool, void *ptr)
     arena->flags[page_id++] = 0;
   }
   return 0;
+}
+
+static unsigned int
+arena_allocated (void *pool, void *ptr)
+{
+  arena_t *arena = pool;
+  if (!ptr) return 0;
+
+  // address out of bounds
+  if (ptr < pool || ptr > pool + arena->bytes) return 0;
+
+  int page_id = (ptr - arena_data(arena)) / arena->page_size;
+
+  // invalid address (not on a page boundary)
+  if ((ptr - arena_data(arena)) % arena->page_size) return 0;
+
+  int first_page_id = page_id;
+  int last_page = 0;
+
+  while (!last_page && page_id < arena->pages)
+    last_page = arena->flags[page_id++] & 2;
+
+  return (page_id - first_page_id) * arena->page_size;
+}
+
+void*
+arena_realloc (void *pool, void *old, unsigned int bytes)
+{
+  unsigned int old_bytes = arena_allocated(pool, old);
+  if (!old_bytes) return NULL;
+
+  if (old_bytes >= bytes) return old;
+
+  void *new = arena_alloc(pool, bytes);
+  if (!new) return NULL;
+
+  unsigned int move_bytes = old_bytes < bytes ? old_bytes: bytes;
+
+  memmove(new, old, move_bytes);
+  arena_free(pool, old);
+
+  return new;
+}
+
+unsigned int
+arena_usage (void *pool)
+{
+  arena_t *arena = pool;
+  unsigned char *flags = &arena->flags[0];
+  unsigned char *limit = arena->flags + arena->pages;
+
+  unsigned int pages_used = 0;
+  for (unsigned int page_id = 0; &flags[page_id] < limit; page_id++)
+    if (flags[page_id]) pages_used++;
+
+  return pages_used;
 }

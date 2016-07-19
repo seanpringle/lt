@@ -36,6 +36,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "vec.h"
 #include "map.h"
 #include "lt.h"
+#include "parse.h"
 
 int
 isname (int c)
@@ -74,6 +75,7 @@ peek_control (char *source)
     || peek(source, "do")
     || peek(source, "end")
     || peek(source, "function")
+    || peek(source, "return")
     || peek(source, "and")
     || peek(source, "or")
     || peek(source, "not");
@@ -92,17 +94,8 @@ skip_comment (char *source)
   return offset;
 }
 
-int parse (char*);
-int parse_control (char*);
-int parse_argument (char*, int level);
-
-#define BLOCK_FUNC 1
-#define BLOCK_BRANCH 2
-#define BLOCK_WHILE 3
-#define BLOCK_FOR 4
-
 int
-parse_control (char *source)
+parse_control (char *source, int drop)
 {
   int offset = str_skip(&source[0], isspace);
   offset += skip_comment(&source[offset]);
@@ -127,13 +120,13 @@ parse_control (char *source)
         break;
 
       case BLOCK_WHILE:
-        compile(OP_UNSTACK);
+        //compile(OP_UNSTACK);
         compile(OP_JMP)->offset = pop_int();
         code[branch].offset = code_count;
         break;
 
       case BLOCK_FOR:
-        compile(OP_UNSTACK);
+        //compile(OP_UNSTACK);
         compile(OP_JMP)->offset = pop_int();
         code[branch].offset = code_count;
         compile(OP_DROP);
@@ -147,7 +140,7 @@ parse_control (char *source)
     int argc = 0;
     for (;;)
     {
-      offset += parse(&source[offset]);
+      offset += parse(&source[offset], KEEP_RESULT);
       argc++;
 
       offset += str_skip(&source[offset], isspace);
@@ -219,79 +212,125 @@ parse_control (char *source)
     }
 
     while (depth() > mark)
-      offset += parse(&source[offset]);
+      offset += parse(&source[offset], DROP_RESULT);
   }
   else
   if (peek(&source[offset], "if"))
   {
     offset += 2;
-    offset += parse(&source[offset]);
-    compile(OP_TEST);
+    int mark = depth();
+
+    push_int(0);
+    push_int(BLOCK_IF);
+
+    while (depth() > mark)
+      offset += parse(&source[offset], KEEP_RESULT);
   }
   else
   if (peek(&source[offset], "while"))
   {
     offset += 5;
     int mark = depth();
+
     push_int(code_count);
-    offset += parse(&source[offset]);
-    compile(OP_TEST);
+    push_int(0);
     push_int(BLOCK_WHILE);
 
     while (depth() > mark)
-      offset += parse(&source[offset]);
+      offset += parse(&source[offset], KEEP_RESULT);
   }
   else
   if (peek(&source[offset], "not"))
   {
     offset += 3;
-    offset += parse(&source[offset]);
+    offset += parse(&source[offset], KEEP_RESULT);
     compile(OP_NOT);
   }
   else
   if (peek(&source[offset], "and"))
   {
     offset += 3;
-    int co = compile(OP_JZ) - code;
-    offset += parse(&source[offset]);
     compile(OP_TEST);
-    code[co].offset = code_count;
+
+    int block = pop_int();
+    int count = pop_int();
+    push_int(code_count);
+    push_int(++count);
+    push_int(block);
+
+    compile(OP_JZ);
   }
   else
   if (peek(&source[offset], "or"))
   {
-    offset += 2;
-    int co = compile(OP_JNZ) - code;
-    offset += parse(&source[offset]);
+    offset += 3;
     compile(OP_TEST);
-    code[co].offset = code_count;
+
+    int block = pop_int();
+    int count = pop_int();
+    push_int(code_count);
+    push_int(++count);
+    push_int(block);
+
+    compile(OP_JNZ);
   }
   else
   if (peek(&source[offset], "then"))
   {
     offset += 4;
+    compile(OP_TEST);
+
+    ensure(pop_int() == BLOCK_IF)
+      errorf("unexpected 'then': %s", &source[offset-4]);
+
+    pop_int();
+    int count = pop_int();
+
+    while (count-- > 0)
+      code[pop_int()].offset = code_count;
+
+    push_int(code_count);
     compile(OP_JZ);
-    push_int(code_count-1);
     push_int(BLOCK_BRANCH);
   }
   else
   if (peek(&source[offset], "do"))
   {
     offset += 2;
-    switch (pop_int())
+
+    int block = pop_int();
+    int count;
+    int mark = depth();
+
+    ensure(block == BLOCK_WHILE || block == BLOCK_FOR)
+      errorf("unexpected 'do': %s", &source[offset-2]);
+
+    switch (block)
     {
       case BLOCK_WHILE:
+        count = pop_int();
+        compile(OP_TEST);
+
+        while (count-- > 0)
+          code[pop_int()].offset = code_count;
+
+        mark = depth();
+        push_int(code_count);
         compile(OP_JZ);
-        push_int(code_count-1);
         push_int(BLOCK_WHILE);
+        //compile(OP_STACK);
         break;
 
       case BLOCK_FOR:
+        mark = depth();
         push_int(code_count-1);
         push_int(BLOCK_FOR);
+        //compile(OP_STACK);
         break;
     }
-    compile(OP_STACK);
+
+    while (depth() > mark)
+      offset += parse(&source[offset], DROP_RESULT);
   }
   else
   if (peek(&source[offset], "else"))
@@ -326,7 +365,7 @@ parse_control (char *source)
     if (peek(&source[offset], "in"))
       offset += 2;
 
-    offset += parse(&source[offset]);
+    offset += parse(&source[offset], KEEP_RESULT);
     compile(OP_LIT)->ptr = to_int(0);
 
     push_int(code_count);
@@ -357,12 +396,12 @@ parse_assign (char *source, int level)
     {
       void *ptr = last->ptr;
       code_count--;
-      offset += parse(&source[offset]);
+      offset += parse(&source[offset], KEEP_RESULT);
       compile(OP_ASSIGN_LIT)->ptr = ptr;
     }
     else
     {
-      offset += parse(&source[offset]);
+      offset += parse(&source[offset], KEEP_RESULT);
       compile(level ? OP_SET: OP_ASSIGN);
     }
   }
@@ -447,7 +486,7 @@ parse_argument (char *source, int level)
       {
         offset += str_skip(&source[offset], isseparator);
         if (source[offset] == ')') { offset++; break; }
-        offset += parse(&source[offset]);
+        offset += parse(&source[offset], KEEP_RESULT);
       }
 
       compile(OP_SCOPE);
@@ -477,7 +516,6 @@ parse_argument (char *source, int level)
     {
       offset++;
       offset += parse_argument(&source[offset], level+1);
-      //offset += parse_assign(&source[offset], level);
     }
 
     offset += str_skip(&source[offset], isspace);
@@ -485,7 +523,7 @@ parse_argument (char *source, int level)
     if (source[offset] == '[')
     {
       offset++;
-      offset += parse(&source[offset]);
+      offset += parse(&source[offset], KEEP_RESULT);
       offset += str_skip(&source[offset], isspace);
       ensure(source[offset] == ']')
         errorf("expected ]: %s", &source[offset]);
@@ -503,7 +541,7 @@ parse_argument (char *source, int level)
     {
       offset += str_skip(&source[offset], isseparator);
       if (source[offset] == ']') { offset++; break; }
-      offset += parse(&source[offset]);
+      offset += parse(&source[offset], KEEP_RESULT);
     }
 
     compile(OP_LITSTACK);
@@ -520,7 +558,7 @@ parse_argument (char *source, int level)
     {
       offset += str_skip(&source[offset], isseparator);
       if (source[offset] == '}') { offset++; break; }
-      offset += parse(&source[offset]);
+      offset += parse(&source[offset], KEEP_RESULT);
       compile(OP_DROP);
     }
 
@@ -538,7 +576,7 @@ parse_argument (char *source, int level)
   if (source[offset] == '#')
   {
     offset++;
-    offset += parse(&source[offset]);
+    offset += parse(&source[offset], KEEP_RESULT);
     compile(OP_COUNT);
   }
   else
@@ -560,14 +598,14 @@ parse_argument (char *source, int level)
 }
 
 int
-parse (char *source)
+parse (char *source, int drop)
 {
   int offset = str_skip(&source[0], isspace);
   offset += skip_comment(&source[offset]);
 
   if (peek_control(&source[offset]))
   {
-    offset += parse_control(&source[offset]);
+    offset += parse_control(&source[offset], drop);
     return offset;
   }
 
@@ -594,7 +632,7 @@ parse (char *source)
     if (source[offset] == '(')
     {
       offset++;
-      offset += parse(&source[offset]);
+      offset += parse(&source[offset], KEEP_RESULT);
       ensure(source[offset] == ')')
         errorf("expected closing paren: %s", &source[offset]);
       offset++;
@@ -653,5 +691,17 @@ parse (char *source)
   while (token_count > 0)
     compile(tokens[--token_count].operation);
 
+  if (drop)
+    compile(OP_DROP);
+
   return offset;
+}
+
+void
+source (char *s)
+{
+  int offset = 0;
+
+  while (s[offset])
+    offset += parse(&s[offset], DROP_RESULT);
 }

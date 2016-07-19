@@ -58,6 +58,7 @@ strf (char *pattern, ...)
   if (len > -1 && (result = arena_alloc(strs, len+1)) && result)
   {
     str_count++;
+    str_created++;
     va_start(args, pattern);
     vsnprintf(result, len+1, pattern, args);
     va_end(args);
@@ -78,6 +79,7 @@ substr (char *start, int offset, int length)
   strncpy(buffer, start+offset, length);
   buffer[length] = 0;
   str_count++;
+  str_created++;
   return buffer;
 }
 

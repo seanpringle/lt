@@ -53,6 +53,8 @@ op_print ()
   }
   fprintf(stream_output, "\n");
   fflush(stream_output);
+
+  while (depth()) op_drop();
 }
 
 void
@@ -61,7 +63,7 @@ op_call ()
   if (call_count == call_limit)
   {
     call_limit += 32;
-    calls = realloc(calls, sizeof(int) * call_limit);
+    calls = heap_realloc(calls, sizeof(int) * call_limit);
   }
 
   calls[call_count++] = ip;
@@ -107,6 +109,9 @@ op_return ()
     vec_push(cstack)[0] = vec_get(stack(), i)[0];
     vec_get(stack(), i)[0] = NULL;
   }
+
+  if (!count)
+    vec_push(cstack)[0] = NULL;
 
   ip = calls[--call_count];
 }
@@ -370,6 +375,7 @@ op_set ()
   void *val = pop();
   void *key = pop();
   void *dst = pop();
+  push(val);
 
   if (is_vec(dst) && is_int(key))
   {
@@ -381,7 +387,6 @@ op_set ()
     map_set(dst, key)[0] = copy(val);
   }
 
-  discard(val);
   discard(key);
   discard(dst);
 }
@@ -655,7 +660,7 @@ op_match()
     matches = sizeof(ovector)/3;
   }
 
-  char *buffer = malloc(strlen(subject)+1);
+  char *buffer = heap_alloc(strlen(subject)+1);
 
   for (int i = 0; i < matches; i++)
   {
@@ -666,9 +671,34 @@ op_match()
     push(substr(buffer, 0, length));
   }
 
-  free(buffer);
+  heap_free(buffer);
 
   if (extra)
     pcre_free(extra);
   pcre_free(re);
+}
+
+void
+op_status ()
+{
+  map_t *status = map_incref(map_alloc());
+  map_set_str(status, "heap_mem")[0] = to_int(heap_mem);
+  map_set_str(status, "heap_limit")[0] = to_int(heap->pages);
+  map_set_str(status, "heap_used")[0] = to_int(arena_usage(heap));
+  map_set_str(status, "ints_mem")[0] = to_int(ints_mem);
+  map_set_str(status, "ints_limit")[0] = to_int(ints->pages);
+  map_set_str(status, "ints_used")[0] = to_int(arena_usage(ints));
+  map_set_str(status, "dbls_mem")[0] = to_int(dbls_mem);
+  map_set_str(status, "dbls_limit")[0] = to_int(dbls->pages);
+  map_set_str(status, "dbls_used")[0] = to_int(arena_usage(dbls));
+  map_set_str(status, "strs_mem")[0] = to_int(strs_mem);
+  map_set_str(status, "strs_limit")[0] = to_int(strs->pages);
+  map_set_str(status, "strs_used")[0] = to_int(arena_usage(strs));
+  map_set_str(status, "vecs_mem")[0] = to_int(vecs_mem);
+  map_set_str(status, "vecs_limit")[0] = to_int(vecs->pages);
+  map_set_str(status, "vecs_used")[0] = to_int(arena_usage(vecs));
+  map_set_str(status, "maps_mem")[0] = to_int(maps_mem);
+  map_set_str(status, "maps_limit")[0] = to_int(maps->pages);
+  map_set_str(status, "maps_used")[0] = to_int(arena_usage(maps));
+  push(status);
 }

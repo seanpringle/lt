@@ -30,17 +30,20 @@ typedef struct _node_t {
 #define MAP_SMUDGED (1<<0)
 
 typedef struct _map_t {
-  node_t *chains[17];
+  node_t **chains;
   unsigned int flags;
   unsigned int count;
   int ref_count;
   struct _map_t *meta;
 } map_t;
 
+arena_t *nodes;
+
 map_t* map_alloc ();
 map_t* map_empty (map_t*);
 void** map_get (map_t*, void*);
 void** map_set (map_t*, void*);
+void** map_set_str (map_t*, char*);
 map_t* map_incref (map_t*);
 map_t* map_decref (map_t*);
 void map_chain (map_t*, map_t*);

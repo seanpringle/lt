@@ -53,6 +53,9 @@ struct wrapper {
   char *name;
 };
 
+void* heap_alloc (unsigned int);
+void* heap_realloc (void*, unsigned int);
+void heap_free (void*);
 int is_bool (void*);
 int is_int (void*);
 int is_dbl (void*);
@@ -102,10 +105,20 @@ extern arena_t *vecs;
 extern arena_t *maps;
 
 extern int int_count;
+extern int int_created;
+extern int int_destroyed;
 extern int dbl_count;
+extern int dbl_created;
+extern int dbl_destroyed;
 extern int str_count;
+extern int str_created;
+extern int str_destroyed;
 extern int vec_count;
+extern int vec_created;
+extern int vec_destroyed;
 extern int map_count;
+extern int map_created;
+extern int map_destroyed;
 
 extern int heap_mem;
 extern int ints_mem;

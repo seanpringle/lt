@@ -75,6 +75,7 @@ void op_not ();
 void op_concat ();
 void op_count ();
 void op_match ();
+void op_status ();
 
 enum {
   OP_PRINT=1,
@@ -132,4 +133,5 @@ enum {
   OP_CONCAT,
   OP_COUNT,
   OP_MATCH,
+  OP_STATUS,
 };

@@ -51,17 +51,27 @@ arena_t *vecs;
 arena_t *maps;
 
 int int_count;
+int int_created;
+int int_destroyed;
 int dbl_count;
+int dbl_created;
+int dbl_destroyed;
 int str_count;
+int str_created;
+int str_destroyed;
 int vec_count;
+int vec_created;
+int vec_destroyed;
 int map_count;
+int map_created;
+int map_destroyed;
 
-int heap_mem =   1*MB;
-int ints_mem = 256*KB;
-int dbls_mem = 256*KB;
-int strs_mem =   1*MB;
-int vecs_mem = 256*KB;
-int maps_mem = 256*KB;
+int heap_mem;
+int ints_mem;
+int dbls_mem;
+int strs_mem;
+int vecs_mem;
+int maps_mem;
 
 map_t *core;
 map_t *super_str;
@@ -135,14 +145,51 @@ func_t funcs[] = {
   [OP_CONCAT] = { .name = "concat", .func = op_concat },
   [OP_COUNT] = { .name = "count", .func = op_count },
   [OP_MATCH] = { .name = "match", .func = op_match },
+  [OP_STATUS] = { .name = "status", .func = op_status },
 };
 
 struct wrapper wrappers[] = {
+  { .op = OP_STATUS,  .results = 1, .name = "status" },
   { .op = OP_PRINT,   .results = 0, .name = "print" },
   { .op = OP_INHERIT, .results = 1, .name = "inherit" },
   { .op = OP_KEYS,    .results = 1, .name = "keys" },
   { .op = OP_VALUES,  .results = 1, .name = "values" },
 };
+
+void*
+heap_alloc (unsigned int bytes)
+{
+  void *ptr = arena_alloc(heap, bytes);
+  ensure(ptr)
+  {
+    errorf("arena_alloc heap %u", bytes);
+    stacktrace();
+  }
+  return ptr;
+}
+
+void*
+heap_realloc (void *old, unsigned int bytes)
+{
+  void *ptr = arena_realloc(heap, old, bytes);
+  ensure(ptr)
+  {
+    errorf("arena_realloc heap %u", bytes);
+    stacktrace();
+  }
+  return ptr;
+}
+
+void
+heap_free (void *ptr)
+{
+  int rc = arena_free(heap, ptr);
+  ensure (rc == 0)
+  {
+    errorf("arena_free heap %d", rc);
+    stacktrace();
+  }
+}
 
 int is_bool (void *ptr) { return ptr == bool_true || ptr == bool_false; }
 int is_int (void *ptr) { return arena_within(ints, ptr); }
@@ -155,9 +202,9 @@ int
 discard (void *ptr)
 {
   if (is_bool(ptr)) return 1;
-  if (is_int(ptr)) { int_count--; return arena_free(ints, ptr); }
-  if (is_dbl(ptr)) { dbl_count--; return arena_free(dbls, ptr); }
-  if (is_str(ptr)) { str_count--; return arena_free(strs, ptr); }
+  if (is_int(ptr)) { int_count--; int_destroyed++; return arena_free(ints, ptr); }
+  if (is_dbl(ptr)) { dbl_count--; dbl_destroyed++; return arena_free(dbls, ptr); }
+  if (is_str(ptr)) { str_count--; str_destroyed++; return arena_free(strs, ptr); }
   if (is_vec(ptr)) { vec_decref(ptr); return 1; }
   if (is_map(ptr)) { map_decref(ptr); return 1; }
   return 1;
@@ -241,6 +288,7 @@ to_int (int64_t n)
 {
   int64_t *ptr = arena_alloc(ints, sizeof(int64_t));
   int_count++;
+  int_created++;
   *ptr = n;
   return ptr;
 }
@@ -256,6 +304,7 @@ to_dbl (double n)
 {
   double *ptr = arena_alloc(dbls, sizeof(double));
   dbl_count++;
+  dbl_created++;
   *ptr = n;
   return ptr;
 }
@@ -381,7 +430,7 @@ int64_t
 pop_int ()
 {
   void *ptr = pop();
-  int64_t n = is_int(ptr) ? get_int(ptr): (is_dbl(ptr) ? get_dbl(ptr): 0);
+  int64_t n = get_int(ptr);
   discard(ptr);
   return n;
 }
@@ -390,7 +439,7 @@ double
 pop_dbl ()
 {
   void *ptr = pop();
-  double n = is_dbl(ptr) ? get_dbl(ptr): (is_int(ptr) ? get_int(ptr): 0);
+  double n = get_dbl(ptr);
   discard(ptr);
   return n;
 }
@@ -404,7 +453,7 @@ top ()
 void*
 under ()
 {
-  return vec_get(stack(), stack()->count-1)[0];
+  return vec_get(stack(), stack()->count-2)[0];
 }
 
 code_t*
@@ -445,7 +494,7 @@ compile (int op)
   if (code_count == code_limit)
   {
     code_limit += 1024;
-    code = realloc(code, sizeof(code_t) * code_limit);
+    code = heap_realloc(code, sizeof(code_t) * code_limit);
     memset(&code[code_count], 0, sizeof(code_t) * (code_limit-code_count));
   }
 
@@ -459,7 +508,7 @@ void
 decompile (code_t *c)
 {
   char *str = to_char(c->ptr);
-  fprintf(stderr, "%04ld  %04d  %-12s %10d   %s\n", c - code, flags, funcs[c->op].name, c->offset, str);
+  fprintf(stderr, "%04ld  %04d  %-10s %4d   %s\n", c - code, flags, funcs[c->op].name, c->offset, str);
   fflush(stderr);
   discard(str);
 }
@@ -475,7 +524,13 @@ void
 run ()
 {
   while (code[ip].op)
+  {
+//    decompile(&code[ip]);
     funcs[code[ip++].op].func();
+//    char *s = to_char(stack());
+//    errorf("%s\n", s);
+//    discard(s);
+  }
 }
 
 void
@@ -520,38 +575,62 @@ slurp ()
 int
 main (int argc, char const *argv[])
 {
+  heap_mem = 8*MB;
+
+  for (int argi = 0; argi < argc; argi++)
+  {
+    if ((!strcmp(argv[argi], "-m") || !strcmp(argv[argi], "--memory")) && argi+1 < argc)
+    {
+      heap_mem = strtoll(argv[++argi], NULL, 0) * MB;
+      continue;
+    }
+  }
+
+  if (heap_mem < 1*MB)
+  {
+    errorf("setting heap_mem = 1MB (minimum)");
+    heap_mem = 1*MB;
+  }
+
+  ints_mem = heap_mem * 0.05;
+  dbls_mem = heap_mem * 0.05;
+  strs_mem = heap_mem * 0.25;
+  vecs_mem = heap_mem * 0.01;
+  maps_mem = heap_mem * 0.01;
+
+  heap = malloc(heap_mem);
+  ensure(heap) errorf("malloc heap %u", heap_mem);
+  arena_open(heap, heap_mem, 1024);
+
+  ints = heap_alloc(ints_mem);
+  arena_open(ints, ints_mem, sizeof(int64_t));
+
+  dbls = heap_alloc(dbls_mem);
+  arena_open(dbls, dbls_mem, sizeof(double));
+
+  strs = heap_alloc(strs_mem);
+  arena_open(strs, strs_mem, 32);
+
+  vecs = heap_alloc(vecs_mem);
+  arena_open(vecs, vecs_mem, sizeof(vec_t));
+
+  maps = heap_alloc(maps_mem);
+  arena_open(maps, maps_mem, sizeof(map_t));
+
   int _bt = 1, _bf = 0;
   bool_true  = &_bt;
   bool_false = &_bf;
 
   call_count = 0;
   call_limit = 32;
-  calls = malloc(sizeof(int) * call_limit);
+  calls = heap_alloc(sizeof(int) * call_limit);
 
   code_count = 0;
   code_limit = 1024;
-  code = malloc(sizeof(code_t) * code_limit);
+  code = heap_alloc(sizeof(code_t) * code_limit);
   memset(code, 0, sizeof(code_t) * code_limit);
 
   stream_output = stdout;
-
-  heap = malloc(heap_mem);
-  arena_open(heap, heap_mem, 1024);
-
-  ints = malloc(ints_mem);
-  arena_open(ints, ints_mem, sizeof(int64_t));
-
-  dbls = malloc(dbls_mem);
-  arena_open(dbls, dbls_mem, sizeof(double));
-
-  strs = malloc(strs_mem);
-  arena_open(strs, strs_mem, 32);
-
-  vecs = malloc(vecs_mem);
-  arena_open(vecs, vecs_mem, sizeof(vec_t));
-
-  maps = malloc(maps_mem);
-  arena_open(maps, maps_mem, sizeof(map_t));
 
   core = map_incref(map_alloc());
   super_str = map_incref(map_alloc());
@@ -577,14 +656,8 @@ main (int argc, char const *argv[])
 
   push(strf("%s", argv[1]));
   slurp();
-
-  char *source = pop();
-  int offset = 0;
-
-  while (source[offset])
-    offset += parse(&source[offset]);
-
-  discard(source);
+  source(top());
+  op_drop();
 
   for (code_t *c = &code[0]; c->op; c++)
     decompile(c);
@@ -594,7 +667,10 @@ main (int argc, char const *argv[])
   op_unscope();
   op_unstack();
 
-  errorf("ints: %d, dbls: %d, strs: %d, vecs: %d, maps: %d", int_count, dbl_count, str_count, vec_count, map_count);
+  errorf("COUNT    ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d", int_count, dbl_count, str_count, vec_count, map_count);
+  errorf("CREATE   ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d", int_created, dbl_created, str_created, vec_created, map_created);
+  errorf("DESTROY  ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d", int_destroyed, dbl_destroyed, str_destroyed, vec_destroyed, map_destroyed);
+  errorf("               %3d,        %3d,        %3d,        %3d,        %3d", int_count-(int_created-int_destroyed), dbl_count-(dbl_created-dbl_destroyed), str_count-(str_created-str_destroyed), vec_count-(vec_created-vec_destroyed), map_count-(map_created-map_destroyed));
 
   return 0;
 }

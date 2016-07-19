@@ -39,7 +39,15 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 map_t*
 map_alloc ()
 {
+  if (!nodes)
+  {
+    int node_mem = maps->pages * 17 * sizeof(node_t);
+    nodes = heap_alloc(node_mem);
+    arena_open(nodes, node_mem, sizeof(node_t));
+  }
+
   map_count++;
+  map_created++;
   map_t *map = arena_alloc(maps, sizeof(map_t));
 
   ensure(map)
@@ -48,6 +56,10 @@ map_alloc ()
     errorf("arena_alloc maps");
   }
   memset(map, 0, sizeof(map_t));
+
+  map->chains = heap_alloc(sizeof(node_t*) * 17);
+  memset(map->chains, 0, sizeof(node_t*) * 17);
+
   return map;
 }
 
@@ -62,11 +74,12 @@ map_empty (map_t *map)
       discard(node->key);
       discard(node->val);
       map->chains[i] = node->next;
-      arena_free(maps, node);
+      arena_free(nodes, node);
     }
   }
   if (map->meta)
     map_decref(map->meta);
+  heap_free(map->chains);
   memset(map, 0, sizeof(map_t));
   return map;
 }
@@ -95,7 +108,7 @@ map_set (map_t *map, void *key)
 
   if (!node)
   {
-    node = arena_alloc(maps, sizeof(node_t));
+    node = arena_alloc(nodes, sizeof(node_t));
     node->next = map->chains[chain];
     map->chains[chain] = node;
     node->key = copy(key);
@@ -107,6 +120,15 @@ map_set (map_t *map, void *key)
   }
   node->val = NULL;
   return &node->val;
+}
+
+void**
+map_set_str (map_t *map, char *str)
+{
+  void *key = substr(str, 0, strlen(str));
+  void **ptr = map_set(map, key);
+  discard(key);
+  return ptr;
 }
 
 map_t*
@@ -124,6 +146,7 @@ map_decref (map_t *map)
     map_empty(map);
     arena_free(maps, map);
     map_count--;
+    map_destroyed++;
     map = NULL;
   }
   return map;
@@ -152,7 +175,15 @@ map_char (map_t *map)
       op_concat();
       push(strf(": "));
       op_concat();
-      push(to_char(node->val));
+
+      if (is_vec(node->val))
+        push(strf("vec[]"));
+      else
+      if (is_map(node->val))
+        push(strf("map[]"));
+      else
+        push(to_char(node->val));
+
       op_concat();
       if (i < map->count-1)
       {

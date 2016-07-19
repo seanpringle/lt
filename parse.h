@@ -25,6 +25,10 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define BLOCK_BRANCH 2
 #define BLOCK_WHILE 3
 #define BLOCK_FOR 4
+#define BLOCK_IF 5
+
+#define KEEP_RESULT 0
+#define DROP_RESULT 1
 
 int isname (int);
 int isseparator (int);
@@ -32,7 +36,8 @@ int islf (int);
 int peek (char*, char*);
 int peek_control (char*);
 int skip_comment (char*);
-int parse (char*);
-int parse_control (char*);
+int parse (char*, int);
+int parse_control (char*, int);
 int parse_argument (char*, int);
 int parse_assign (char*, int);
+void source (char*);

@@ -33,4 +33,6 @@ int arena_within (void*, void*);
 int arena_open (void*, unsigned int, unsigned int);
 int arena_close (void*);
 void* arena_alloc (void*, unsigned int);
+void* arena_realloc (void*, void*, unsigned int);
 int arena_free (void*, void*);
+unsigned int arena_usage(void*);
