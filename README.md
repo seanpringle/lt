@@ -22,8 +22,6 @@ Don't think of LT as anything but an experiment. Bugs abound, and there's a heap
 
 - No iterators
 - No metamethods
-- No coroutines
-- No closures
 - Standard libraries have big gaps or are missing entirely
 - Only numeric `for` exists, and is limited to a simple 1+ counter
 - Not (easily) embeddable
