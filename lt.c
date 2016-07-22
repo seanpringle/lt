@@ -83,7 +83,6 @@ map_t *scope_global;
 map_t *super_str;
 map_t *super_vec;
 map_t *super_map;
-map_t *super_cor;
 
 cor_t **routines;
 int routine_count;
@@ -97,7 +96,6 @@ FILE *stream_output;
 func_t funcs[] = {
   [OP_PRINT] = { .name = "print", .func = op_print },
   [OP_COROUTINE] = { .name = "coroutine", .func = op_coroutine },
-  [OP_ROUTINE] = { .name = "routine", .func = op_routine },
   [OP_RESUME] = { .name = "resume", .func = op_resume },
   [OP_YIELD] = { .name = "yield", .func = op_yield },
   [OP_CALL] = { .name = "call", .func = op_call },
@@ -162,10 +160,6 @@ struct wrapper wrappers[] = {
   { .library = &scope_core, .op = OP_INHERIT, .results = 1, .name = "inherit" },
   { .library = &scope_core, .op = OP_KEYS,    .results = 1, .name = "keys" },
   { .library = &scope_core, .op = OP_VALUES,  .results = 1, .name = "values" },
-
-  { .library = &super_cor, .op = OP_ROUTINE, .results =  1, .name = "create" },
-  { .library = &super_cor, .op = OP_RESUME,  .results = -1, .name = "resume" },
-  { .library = &super_cor, .op = OP_YIELD,   .results = -1, .name = "yield"  },
 };
 
 void*
@@ -697,7 +691,6 @@ main (int argc, char const *argv[])
   super_str = map_incref(map_alloc());
   super_vec = map_incref(map_alloc());
   super_map = map_incref(map_alloc());
-  super_cor = map_incref(map_alloc());
 
   routine_count = 0;
   routines = heap_alloc(sizeof(cor_t*) * 32);

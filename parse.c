@@ -478,7 +478,7 @@ parse_argument (char *source, int level)
       discard(name);
     }
     else
-    if (!strcmp(name, "routine"))
+    if (!strcmp(name, "coroutine"))
     {
       ensure(source[offset] == '(')
         errorf("expected (: %s", &source[offset]);
@@ -493,7 +493,7 @@ parse_argument (char *source, int level)
       offset++; // )
       discard(name);
 
-      compile(OP_ROUTINE);
+      compile(OP_COROUTINE);
     }
     else
     if (!strcmp(name, "resume"))

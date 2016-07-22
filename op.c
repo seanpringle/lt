@@ -60,12 +60,6 @@ op_print ()
 void
 op_coroutine ()
 {
-  push(map_incref(super_cor));
-}
-
-void
-op_routine ()
-{
   cor_t *cor = cor_incref(cor_alloc());
   cor->ip = pop_int();
   push(cor);
