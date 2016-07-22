@@ -22,6 +22,10 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 void op_print ();
+void op_coroutine ();
+void op_routine ();
+void op_resume ();
+void op_yield ();
 void op_call ();
 void op_call_lit ();
 void op_return ();
@@ -79,6 +83,10 @@ void op_status ();
 
 enum {
   OP_PRINT=1,
+  OP_COROUTINE,
+  OP_ROUTINE,
+  OP_RESUME,
+  OP_YIELD,
   OP_CALL,
   OP_CALL_LIT,
   OP_RETURN,

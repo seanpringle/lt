@@ -1,4 +1,4 @@
-CFLAGS=-Wall -Werror -c -g -std=c99 -O2
+CFLAGS=-Wall -Werror -c -g -std=c99 -O0
 LDFLAGS=-lpcre
 
 all:

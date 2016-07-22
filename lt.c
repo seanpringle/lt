@@ -49,6 +49,7 @@ arena_t *dbls;
 arena_t *strs;
 arena_t *vecs;
 arena_t *maps;
+arena_t *cors;
 
 int int_count;
 int int_created;
@@ -65,6 +66,9 @@ int vec_destroyed;
 int map_count;
 int map_created;
 int map_destroyed;
+int cor_count;
+int cor_created;
+int cor_destroyed;
 
 int heap_mem;
 int ints_mem;
@@ -72,18 +76,18 @@ int dbls_mem;
 int strs_mem;
 int vecs_mem;
 int maps_mem;
+int cors_mem;
 
-map_t *core;
+map_t *scope_core;
+map_t *scope_global;
 map_t *super_str;
 map_t *super_vec;
 map_t *super_map;
-vec_t *stacks;
-vec_t *scopes;
-int *calls;
-int call_count;
-int call_limit;
-int ip;
-int flags;
+map_t *super_cor;
+
+cor_t **routines;
+int routine_count;
+int routine_limit;
 
 code_t *code;
 int code_count;
@@ -92,6 +96,10 @@ FILE *stream_output;
 
 func_t funcs[] = {
   [OP_PRINT] = { .name = "print", .func = op_print },
+  [OP_COROUTINE] = { .name = "coroutine", .func = op_coroutine },
+  [OP_ROUTINE] = { .name = "routine", .func = op_routine },
+  [OP_RESUME] = { .name = "resume", .func = op_resume },
+  [OP_YIELD] = { .name = "yield", .func = op_yield },
   [OP_CALL] = { .name = "call", .func = op_call },
   [OP_CALL_LIT] = { .name = "call_lit", .func = op_call_lit },
   [OP_RETURN] = { .name = "return", .func = op_return },
@@ -149,11 +157,15 @@ func_t funcs[] = {
 };
 
 struct wrapper wrappers[] = {
-  { .op = OP_STATUS,  .results = 1, .name = "status" },
-  { .op = OP_PRINT,   .results = 0, .name = "print" },
-  { .op = OP_INHERIT, .results = 1, .name = "inherit" },
-  { .op = OP_KEYS,    .results = 1, .name = "keys" },
-  { .op = OP_VALUES,  .results = 1, .name = "values" },
+  { .library = &scope_core, .op = OP_STATUS,  .results = 1, .name = "status" },
+  { .library = &scope_core, .op = OP_PRINT,   .results = 0, .name = "print" },
+  { .library = &scope_core, .op = OP_INHERIT, .results = 1, .name = "inherit" },
+  { .library = &scope_core, .op = OP_KEYS,    .results = 1, .name = "keys" },
+  { .library = &scope_core, .op = OP_VALUES,  .results = 1, .name = "values" },
+
+  { .library = &super_cor, .op = OP_ROUTINE, .results =  1, .name = "create" },
+  { .library = &super_cor, .op = OP_RESUME,  .results = -1, .name = "resume" },
+  { .library = &super_cor, .op = OP_YIELD,   .results = -1, .name = "yield"  },
 };
 
 void*
@@ -191,12 +203,59 @@ heap_free (void *ptr)
   }
 }
 
+cor_t*
+routine ()
+{
+  return routines[routine_count-1];
+}
+
+cor_t*
+cor_alloc ()
+{
+  cor_t *cor = arena_alloc(cors, sizeof(cor_t));
+  memset(cor, 0, sizeof(cor_t));
+
+  cor->stacks = vec_incref(vec_alloc());
+  cor->scopes = vec_incref(vec_alloc());
+  cor->call_count = 0;
+  cor->call_limit = 32;
+  cor->calls = heap_alloc(sizeof(int) * cor->call_limit);
+  cor->ref_count = 0;
+  cor->flags = 0;
+  cor->ip = 0;
+  cor->state = COR_SUSPENDED;
+
+  return cor;
+}
+
+cor_t*
+cor_incref (cor_t *cor)
+{
+  cor->ref_count++;
+  return cor;
+}
+
+cor_t*
+cor_decref (cor_t *cor)
+{
+  if (--cor->ref_count == 0)
+  {
+    vec_decref(cor->stacks);
+    vec_decref(cor->scopes);
+    heap_free(cor->calls);
+    memset(cor, 0, sizeof(cor_t));
+    cor = NULL;
+  }
+  return cor;
+}
+
 int is_bool (void *ptr) { return ptr == bool_true || ptr == bool_false; }
 int is_int (void *ptr) { return arena_within(ints, ptr); }
 int is_dbl (void *ptr) { return arena_within(dbls, ptr); }
 int is_str (void *ptr) { return arena_within(strs, ptr); }
 int is_vec (void *ptr) { return arena_within(vecs, ptr); }
 int is_map (void *ptr) { return arena_within(maps, ptr); }
+int is_cor (void *ptr) { return arena_within(cors, ptr); }
 
 int
 discard (void *ptr)
@@ -207,6 +266,7 @@ discard (void *ptr)
   if (is_str(ptr)) { str_count--; str_destroyed++; return arena_free(strs, ptr); }
   if (is_vec(ptr)) { vec_decref(ptr); return 1; }
   if (is_map(ptr)) { map_decref(ptr); return 1; }
+  if (is_cor(ptr)) { cor_decref(ptr); return 1; }
   return 1;
 }
 
@@ -218,6 +278,7 @@ copy (void *ptr)
   if (is_str(ptr)) return substr(ptr, 0, strlen(ptr));
   if (is_vec(ptr)) return vec_incref(ptr);
   if (is_map(ptr)) return map_incref(ptr);
+  if (is_cor(ptr)) return cor_incref(ptr);
   return ptr;
 }
 
@@ -324,6 +385,7 @@ to_char (void *ptr)
   if (is_str(ptr)) return strf("%s", ptr);
   if (is_vec(ptr)) return vec_char(ptr);
   if (is_map(ptr)) return map_char(ptr);
+  if (is_cor(ptr)) return strf("cor()");
   if (!ptr) return strf("nil");
   return strf("ptr: %llu", (uint64_t)ptr);
 }
@@ -331,36 +393,30 @@ to_char (void *ptr)
 vec_t*
 stack ()
 {
-  return vec_get(stacks, stacks->count-1)[0];
+  return vec_get(routine()->stacks, routine()->stacks->count-1)[0];
 }
 
 vec_t*
 caller_stack ()
 {
-  return vec_get(stacks, stacks->count-2)[0];
-}
-
-map_t*
-global ()
-{
-  return vec_get(scopes, 0)[0];
+  return vec_get(routine()->stacks, routine()->stacks->count-2)[0];
 }
 
 map_t*
 scope_writing ()
 {
-  return vec_get(scopes, scopes->count-1)[0];
+  return routine()->scopes->count ? vec_get(routine()->scopes, routine()->scopes->count-1)[0]: scope_global;
 }
 
 map_t*
 scope_reading ()
 {
-  for (int i = scopes->count-1; i >= 0; i--)
+  for (int i = routine()->scopes->count-1; i >= 0; i--)
   {
-    map_t *map = vec_get(scopes, i)[0];
+    map_t *map = vec_get(routine()->scopes, i)[0];
     if (!(map->flags & MAP_SMUDGED)) return map;
   }
-  return global();
+  return scope_global;
 }
 
 int
@@ -373,6 +429,12 @@ void
 push (void *ptr)
 {
   vec_push(stack())[0] = ptr;
+}
+
+void
+caller_push (void *ptr)
+{
+  vec_push(caller_stack())[0] = ptr;
 }
 
 void
@@ -396,14 +458,14 @@ push_dbl (double n)
 void
 push_flag (int flag)
 {
-  if (code[ip].op == OP_TEST)
+  if (code[routine()->ip].op == OP_TEST)
   {
-    flags = 0;
+    routine()->flags = 0;
 
     if (flag)
-      flags |= FLAG_TRUE;
+      routine()->flags |= FLAG_TRUE;
 
-    ip++;
+    routine()->ip++;
   }
   else
   {
@@ -508,28 +570,26 @@ void
 decompile (code_t *c)
 {
   char *str = to_char(c->ptr);
-  fprintf(stderr, "%04ld  %04d  %-10s %4d   %s\n", c - code, flags, funcs[c->op].name, c->offset, str);
+  fprintf(stderr, "%04ld  %04d  %-10s %4d   %s\n", c - code, routine()->flags, funcs[c->op].name, c->offset, str);
   fflush(stderr);
   discard(str);
 }
 
 void stacktrace ()
 {
-  decompile(&code[ip-1]);
-  for (int i = call_count-1; i >= 0; i--)
-    decompile(&code[calls[i]-1]);
+  decompile(&code[routine()->ip-1]);
+  for (int i = routine()->call_count-1; i >= 0; i--)
+    decompile(&code[routine()->calls[i]-1]);
 }
 
 void
 run ()
 {
-  while (code[ip].op)
+  while (code[routine()->ip].op)
   {
-//    decompile(&code[ip]);
-    funcs[code[ip++].op].func();
-//    char *s = to_char(stack());
-//    errorf("%s\n", s);
-//    discard(s);
+//    decompile(&code[routine()->ip]);
+    funcs[code[routine()->ip++].op].func();
+//    char *s = to_char(stack()); errorf("%s\n", s); discard(s);
   }
 }
 
@@ -597,6 +657,7 @@ main (int argc, char const *argv[])
   strs_mem = heap_mem * 0.25;
   vecs_mem = heap_mem * 0.01;
   maps_mem = heap_mem * 0.01;
+  cors_mem = heap_mem * 0.01;
 
   heap = malloc(heap_mem);
   ensure(heap) errorf("malloc heap %u", heap_mem);
@@ -617,13 +678,12 @@ main (int argc, char const *argv[])
   maps = heap_alloc(maps_mem);
   arena_open(maps, maps_mem, sizeof(map_t));
 
+  cors = heap_alloc(cors_mem);
+  arena_open(cors, cors_mem, sizeof(cor_t));
+
   int _bt = 1, _bf = 0;
   bool_true  = &_bt;
   bool_false = &_bf;
-
-  call_count = 0;
-  call_limit = 32;
-  calls = heap_alloc(sizeof(int) * call_limit);
 
   code_count = 0;
   code_limit = 1024;
@@ -632,13 +692,17 @@ main (int argc, char const *argv[])
 
   stream_output = stdout;
 
-  core = map_incref(map_alloc());
+  scope_core = map_incref(map_alloc());
+  scope_global = map_incref(map_alloc());
   super_str = map_incref(map_alloc());
   super_vec = map_incref(map_alloc());
   super_map = map_incref(map_alloc());
+  super_cor = map_incref(map_alloc());
 
-  stacks = vec_alloc();
-  scopes = vec_alloc();
+  routine_count = 0;
+  routines = heap_alloc(sizeof(cor_t*) * 32);
+
+  routines[routine_count++] = cor_incref(cor_alloc());
 
   op_stack();
   op_scope();
@@ -646,13 +710,13 @@ main (int argc, char const *argv[])
   for (int i = 0; i < sizeof(wrappers) / sizeof(struct wrapper); i++)
   {
     char *name = substr(wrappers[i].name, 0, strlen(wrappers[i].name));
-    map_set(core, name)[0] = to_int(code_count);
+    map_set(wrappers[i].library[0], name)[0] = to_int(code_count);
     compile(wrappers[i].op);
     compile(OP_RETURN)->offset = wrappers[i].results;
     discard(name);
   }
 
-  ip = code_count;
+  routine()->ip = code_count;
 
   push(strf("%s", argv[1]));
   slurp();
@@ -664,13 +728,10 @@ main (int argc, char const *argv[])
 
   run();
 
-  op_unscope();
-  op_unstack();
-
-  errorf("COUNT    ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d", int_count, dbl_count, str_count, vec_count, map_count);
-  errorf("CREATE   ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d", int_created, dbl_created, str_created, vec_created, map_created);
-  errorf("DESTROY  ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d", int_destroyed, dbl_destroyed, str_destroyed, vec_destroyed, map_destroyed);
-  errorf("               %3d,        %3d,        %3d,        %3d,        %3d", int_count-(int_created-int_destroyed), dbl_count-(dbl_created-dbl_destroyed), str_count-(str_created-str_destroyed), vec_count-(vec_created-vec_destroyed), map_count-(map_created-map_destroyed));
+  errorf("COUNT    ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d  cors: %3d", int_count, dbl_count, str_count, vec_count, map_count, cor_count);
+  errorf("CREATE   ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d  cors: %3d", int_created, dbl_created, str_created, vec_created, map_created, cor_created);
+  errorf("DESTROY  ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d  cors: %3d", int_destroyed, dbl_destroyed, str_destroyed, vec_destroyed, map_destroyed, cor_destroyed);
+  errorf("               %3d,        %3d,        %3d,        %3d,        %3d        %3d", int_count-(int_created-int_destroyed), dbl_count-(dbl_created-dbl_destroyed), str_count-(str_created-str_destroyed), vec_count-(vec_created-vec_destroyed), map_count-(map_created-map_destroyed), cor_count-(cor_created-cor_destroyed));
 
   return 0;
 }

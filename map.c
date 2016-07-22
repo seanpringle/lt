@@ -63,9 +63,17 @@ map_alloc ()
   return map;
 }
 
+static void
+ensure_map (map_t *map, const char *func)
+{
+  ensure(is_map(map)) errorf("%s not a map_t", func);
+}
+
 map_t*
 map_empty (map_t *map)
 {
+  ensure_map(map, __func__);
+
   for (int i = 0; i < 17; i++)
   {
     while (map->chains[i])
@@ -87,6 +95,8 @@ map_empty (map_t *map)
 void**
 map_get (map_t *map, void *key)
 {
+  ensure_map(map, __func__);
+
   uint32_t chain = hash(key) % 17;
   node_t *node = map->chains[chain];
   while (node && !equal(node->key, key))
@@ -101,6 +111,8 @@ map_get (map_t *map, void *key)
 void**
 map_set (map_t *map, void *key)
 {
+  ensure_map(map, __func__);
+
   uint32_t chain = hash(key) % 17;
   node_t *node = map->chains[chain];
   while (node && !equal(node->key, key))
@@ -125,6 +137,8 @@ map_set (map_t *map, void *key)
 void**
 map_set_str (map_t *map, char *str)
 {
+  ensure_map(map, __func__);
+
   void *key = substr(str, 0, strlen(str));
   void **ptr = map_set(map, key);
   discard(key);
@@ -134,6 +148,8 @@ map_set_str (map_t *map, char *str)
 map_t*
 map_incref (map_t *map)
 {
+  ensure_map(map, __func__);
+
   map->ref_count++;
   return map;
 }
@@ -141,6 +157,8 @@ map_incref (map_t *map)
 map_t*
 map_decref (map_t *map)
 {
+  ensure_map(map, __func__);
+
   if (--map->ref_count == 0)
   {
     map_empty(map);
@@ -155,6 +173,8 @@ map_decref (map_t *map)
 void
 map_chain (map_t *map, map_t *meta)
 {
+  ensure_map(map, __func__);
+
   map_incref(meta);
   if (map->meta)
     map_decref(map->meta);
@@ -164,6 +184,8 @@ map_chain (map_t *map, map_t *meta)
 char*
 map_char (map_t *map)
 {
+  ensure_map(map, __func__);
+
   push(strf("{"));
 
   int i = 0;

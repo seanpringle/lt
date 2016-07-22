@@ -58,15 +58,82 @@ op_print ()
 }
 
 void
-op_call ()
+op_coroutine ()
 {
-  if (call_count == call_limit)
+  push(map_incref(super_cor));
+}
+
+void
+op_routine ()
+{
+  cor_t *cor = cor_incref(cor_alloc());
+  cor->ip = pop_int();
+  push(cor);
+}
+
+void
+op_resume ()
+{
+  cor_t *cor = vec_get(stack(), 0)[0];
+
+  if (cor->state == COR_DEAD)
   {
-    call_limit += 32;
-    calls = heap_realloc(calls, sizeof(int) * call_limit);
+    caller_push(to_bool(0));
+    caller_push(strf("cannot resume dead coroutine"));
+    return;
   }
 
-  calls[call_count++] = ip;
+  if (!cor->stacks->count)
+  {
+    vec_push(cor->stacks)[0] = vec_incref(caller_stack());
+    vec_push(cor->stacks)[0] = vec_incref(vec_alloc());
+    vec_push(cor->scopes)[0] = map_incref(map_alloc());
+
+    for (int i = 1; i < stack()->count; i++)
+      vec_push(vec_get(cor->stacks, 0)[0])[0] = vec_get(stack(), i)[0];
+
+    stack()->count = 0;
+  }
+  else
+  {
+    vec_incref(caller_stack());
+    vec_set(cor->stacks, 0)[0] = caller_stack();
+    vec_push(vec_get(cor->stacks, cor->stacks->count-1)[0])[0] = NULL;
+  }
+
+  cor->state = COR_RUNNING;
+  routines[routine_count++] = cor_incref(cor);
+}
+
+void
+op_yield ()
+{
+  int count = code[routine()->ip-1].offset;
+
+  for (int i = stack()->count-count; i < stack()->count; i++)
+  {
+    caller_push(vec_get(stack(), i)[0]);
+    vec_get(stack(), i)[0] = NULL;
+  }
+
+  stack()->count -= count;
+
+  if (!count)
+    caller_push(NULL);
+
+  discard(routines[--routine_count]);
+}
+
+void
+op_call ()
+{
+  if (routine()->call_count == routine()->call_limit)
+  {
+    routine()->call_limit += 32;
+    routine()->calls = heap_realloc(routine()->calls, sizeof(int) * routine()->call_limit);
+  }
+
+  routine()->calls[routine()->call_count++] = routine()->ip;
   void *ptr = vec_pop(caller_stack());
 
   ensure(is_int(ptr))
@@ -75,63 +142,74 @@ op_call ()
     stacktrace();
   }
 
-  ip = get_int(ptr);
+  routine()->ip = get_int(ptr);
   discard(ptr);
 }
 
 void
 op_call_lit ()
 {
-  calls[call_count++] = ip;
+  if (routine()->call_count == routine()->call_limit)
+  {
+    routine()->call_limit += 32;
+    routine()->calls = heap_realloc(routine()->calls, sizeof(int) * routine()->call_limit);
+  }
 
-  void **ptr = map_get(scope_reading(), code[ip-1].ptr);
-  if (!ptr) ptr = map_get(global(), code[ip-1].ptr);
-  if (!ptr) ptr = map_get(core, code[ip-1].ptr);
+  routine()->calls[routine()->call_count++] = routine()->ip;
+
+  void **ptr = map_get(scope_reading(), code[routine()->ip-1].ptr);
+  if (!ptr) ptr = map_get(scope_global, code[routine()->ip-1].ptr);
+  if (!ptr) ptr = map_get(scope_core, code[routine()->ip-1].ptr);
 
   ensure(ptr)
   {
-    errorf("unknown name: %s", (char*)code[ip-1].ptr);
+    errorf("unknown name: %s", (char*)code[routine()->ip-1].ptr);
     stacktrace();
   }
 
-  ip = get_int(ptr[0]);
+  routine()->ip = get_int(ptr[0]);
 }
 
 void
 op_return ()
 {
-  vec_t *cstack = caller_stack();
+  if (routine()->call_count == 0)
+  {
+    routine()->state = COR_DEAD;
+    op_yield();
+    return;
+  }
 
-  int count = code[ip-1].offset;
+  int count = code[routine()->ip-1].offset;
 
   for (int i = 0; i < count; i++)
   {
-    vec_push(cstack)[0] = vec_get(stack(), i)[0];
+    caller_push(vec_get(stack(), i)[0]);
     vec_get(stack(), i)[0] = NULL;
   }
 
   if (!count)
-    vec_push(cstack)[0] = NULL;
+    caller_push(NULL);
 
-  ip = calls[--call_count];
+  routine()->ip = routine()->calls[--routine()->call_count];
 }
 
 void
 op_lit ()
 {
-  push(copy(code[ip-1].ptr));
+  push(copy(code[routine()->ip-1].ptr));
 }
 
 void
 op_stack ()
 {
-  vec_push(stacks)[0] = vec_incref(vec_alloc());
+  vec_push(routine()->stacks)[0] = vec_incref(vec_alloc());
 }
 
 void
 op_scope ()
 {
-  vec_push(scopes)[0] = map_incref(map_alloc());
+  vec_push(routine()->scopes)[0] = map_incref(map_alloc());
 }
 
 void
@@ -143,25 +221,25 @@ op_smudge ()
 void
 op_unstack ()
 {
-  discard(vec_pop(stacks));
+  discard(vec_pop(routine()->stacks));
 }
 
 void
 op_litstack ()
 {
-  push(vec_pop(stacks));
+  push(vec_pop(routine()->stacks));
 }
 
 void
 op_unscope ()
 {
-  discard(vec_pop(scopes));
+  discard(vec_pop(routine()->scopes));
 }
 
 void
 op_litscope ()
 {
-  map_t *map = vec_pop(scopes);
+  map_t *map = vec_pop(routine()->scopes);
   map->flags &= ~MAP_SMUDGED;
   push(map);
 }
@@ -187,7 +265,7 @@ op_table ()
 void
 op_global ()
 {
-  push(copy(global()));
+  push(copy(scope_global));
 }
 
 void
@@ -199,7 +277,7 @@ op_local ()
 void
 op_defnil ()
 {
-  while (depth() < code[ip-1].offset)
+  while (depth() < code[routine()->ip-1].offset)
     push(NULL);
 }
 
@@ -230,29 +308,29 @@ op_drop ()
 void
 op_test ()
 {
-  flags = 0;
+  routine()->flags = 0;
   if (truth(top()))
-    flags |= FLAG_TRUE;
+    routine()->flags |= FLAG_TRUE;
   op_drop();
 }
 
 void
 op_jmp ()
 {
-  ip = code[ip-1].offset;
+  routine()->ip = code[routine()->ip-1].offset;
 }
 
 void
 op_jfalse ()
 {
-  if (!(flags & FLAG_TRUE))
+  if (!(routine()->flags & FLAG_TRUE))
     op_jmp();
 }
 
 void
 op_jtrue ()
 {
-  if (flags & FLAG_TRUE)
+  if (routine()->flags & FLAG_TRUE)
     op_jmp();
 }
 
@@ -268,7 +346,7 @@ op_define ()
 void
 op_for ()
 {
-  void *name = code[ip-1].ptr;
+  void *name = code[routine()->ip-1].ptr;
 
   int step = pop_int();
   void *iter = top();
@@ -277,7 +355,7 @@ op_for ()
   {
     if (step == get_int(iter))
     {
-      ip = code[ip-1].offset;
+      routine()->ip = code[routine()->ip-1].offset;
     }
     else
     {
@@ -290,7 +368,7 @@ op_for ()
   {
     if (step == count(iter))
     {
-      ip = code[ip-1].offset;
+      routine()->ip = code[routine()->ip-1].offset;
     }
     else
     {
@@ -339,7 +417,7 @@ op_assign ()
 void
 op_assign_lit ()
 {
-  map_set(scope_writing(), code[ip-1].ptr)[0] = copy(top());
+  map_set(scope_writing(), code[routine()->ip-1].ptr)[0] = copy(top());
 }
 
 void
@@ -347,8 +425,8 @@ op_find ()
 {
   char *key = pop();
   void **ptr = map_get(scope_reading(), key);
-  if (!ptr) ptr = map_get(global(), key);
-  if (!ptr) ptr = map_get(core, key);
+  if (!ptr) ptr = map_get(scope_global, key);
+  if (!ptr) ptr = map_get(scope_core, key);
   push(ptr ? copy(ptr[0]): NULL);
   discard(key);
 }
@@ -356,10 +434,10 @@ op_find ()
 void
 op_find_lit ()
 {
-  char *key = code[ip-1].ptr;
+  char *key = code[routine()->ip-1].ptr;
   void **ptr = map_get(scope_reading(), key);
-  if (!ptr) ptr = map_get(global(), key);
-  if (!ptr) ptr = map_get(core, key);
+  if (!ptr) ptr = map_get(scope_global, key);
+  if (!ptr) ptr = map_get(scope_core, key);
 
   ensure(ptr)
   {
@@ -428,7 +506,7 @@ op_get ()
 void
 op_get_lit ()
 {
-  void *key = code[ip-1].ptr;
+  void *key = code[routine()->ip-1].ptr;
   void *src = pop();
 
   if (is_vec(src) && is_int(key))
@@ -467,10 +545,10 @@ void
 op_add_lit ()
 {
   if (is_int(top()))
-    ((int64_t*)top())[0] += get_int(code[ip-1].ptr);
+    ((int64_t*)top())[0] += get_int(code[routine()->ip-1].ptr);
   else
   if (is_dbl(top()))
-    ((double*)top())[0] += get_dbl(code[ip-1].ptr);
+    ((double*)top())[0] += get_dbl(code[routine()->ip-1].ptr);
   else
   {
     stacktrace();
@@ -554,7 +632,7 @@ void
 op_lt_lit ()
 {
   void *a = pop();
-  push_flag(less(a, code[ip-1].ptr));
+  push_flag(less(a, code[routine()->ip-1].ptr));
   discard(a);
 }
 

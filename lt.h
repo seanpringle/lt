@@ -46,7 +46,24 @@ typedef struct {
   opcb func;
 } func_t;
 
+typedef struct {
+  vec_t *stacks;
+  vec_t *scopes;
+  int *calls;
+  int call_count;
+  int call_limit;
+  int ip;
+  int flags;
+  int ref_count;
+  int state;
+} cor_t;
+
+#define COR_SUSPENDED 0
+#define COR_RUNNING 1
+#define COR_DEAD 2
+
 struct wrapper {
+  map_t **library;
   int op;
   int arguments;
   int results;
@@ -62,6 +79,7 @@ int is_dbl (void*);
 int is_str (void*);
 int is_vec (void*);
 int is_map (void*);
+int is_cor (void*);
 char* to_char (void*);
 void* to_bool(int);
 int get_bool(void*);
@@ -76,6 +94,7 @@ int64_t count (void*);
 int truth (void*);
 int less (void*,void*);
 void push (void*);
+void caller_push (void*);
 void push_bool (int);
 void push_int (int64_t);
 void push_dbl (double);
@@ -88,7 +107,6 @@ void* under ();
 uint32_t hash (void*);
 vec_t* stack ();
 vec_t* caller_stack ();
-map_t* global ();
 map_t* scope_reading ();
 map_t* scope_writing ();
 map_t* caller_scope ();
@@ -96,6 +114,10 @@ int depth ();
 void stacktrace ();
 code_t* compile (int);
 code_t* hindsight (int);
+cor_t* routine ();
+cor_t* cor_alloc ();
+cor_t* cor_incref ();
+cor_t* cor_decref ();
 
 extern arena_t *heap;
 extern arena_t *ints;
@@ -103,6 +125,7 @@ extern arena_t *dbls;
 extern arena_t *strs;
 extern arena_t *vecs;
 extern arena_t *maps;
+extern arena_t *cors;
 
 extern int int_count;
 extern int int_created;
@@ -119,6 +142,9 @@ extern int vec_destroyed;
 extern int map_count;
 extern int map_created;
 extern int map_destroyed;
+extern int cor_count;
+extern int cor_created;
+extern int cor_destroyed;
 
 extern int heap_mem;
 extern int ints_mem;
@@ -126,18 +152,18 @@ extern int dbls_mem;
 extern int strs_mem;
 extern int vecs_mem;
 extern int maps_mem;
+extern int cors_mem;
 
-extern map_t *core;
+extern map_t *scope_core;
+extern map_t *scope_global;
 extern map_t *super_str;
 extern map_t *super_vec;
 extern map_t *super_map;
-extern vec_t *stacks;
-extern vec_t *scopes;
-extern int *calls;
-extern int call_count;
-extern int call_limit;
-extern int ip;
-extern int flags;
+extern map_t *super_cor;
+
+extern cor_t **routines;
+extern int routine_count;
+extern int routine_limit;
 
 extern code_t *code;
 extern int code_count;

@@ -55,9 +55,17 @@ vec_alloc ()
   return vec;
 }
 
+static void
+ensure_vec (vec_t *vec, const char *func)
+{
+  ensure(is_vec(vec)) errorf("%s not a vec_t", func);
+}
+
 void**
 vec_ins (vec_t *vec, int index)
 {
+  ensure_vec(vec, __func__);
+
   if (index > vec->count) index = vec->count;
   if (index < 0) index = 0;
 
@@ -74,6 +82,8 @@ vec_ins (vec_t *vec, int index)
 void**
 vec_set (vec_t *vec, int index)
 {
+  ensure_vec(vec, __func__);
+
   if (index > vec->count) index = vec->count;
   if (index < 0) index = 0;
 
@@ -94,6 +104,8 @@ vec_push (vec_t *vec)
 void*
 vec_del (vec_t *vec, int index)
 {
+  ensure_vec(vec, __func__);
+
   if (index >= vec->count || index < 0) return NULL;
 
   void *ptr = vec->items[index];
@@ -105,6 +117,8 @@ vec_del (vec_t *vec, int index)
 void*
 vec_pop (vec_t *vec)
 {
+  ensure_vec(vec, __func__);
+
   if (!vec->count) return NULL;
   return vec_del(vec, vec->count-1);
 }
@@ -112,14 +126,17 @@ vec_pop (vec_t *vec)
 void**
 vec_get (vec_t *vec, int index)
 {
-  if (index >= vec->count || index < 0) return NULL;
+  ensure_vec(vec, __func__);
 
+  if (index >= vec->count || index < 0) return NULL;
   return &vec->items[index];
 }
 
 vec_t*
 vec_empty (vec_t *vec)
 {
+  ensure_vec(vec, __func__);
+
   for (int i = 0; i < vec->count; i++)
     discard(vec->items[i]);
   heap_free(vec->items);
@@ -130,6 +147,8 @@ vec_empty (vec_t *vec)
 vec_t*
 vec_incref (vec_t *vec)
 {
+  ensure_vec(vec, __func__);
+
   vec->ref_count++;
   return vec;
 }
@@ -137,6 +156,8 @@ vec_incref (vec_t *vec)
 vec_t*
 vec_decref (vec_t *vec)
 {
+  ensure_vec(vec, __func__);
+
   if (--vec->ref_count == 0)
   {
     vec_empty(vec);
@@ -151,6 +172,8 @@ vec_decref (vec_t *vec)
 char*
 vec_char (vec_t *vec)
 {
+  ensure_vec(vec, __func__);
+
   int count = vec->count;
 
   push(strf("["));

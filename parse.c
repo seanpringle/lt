@@ -433,41 +433,108 @@ parse_argument (char *source, int level)
     if (!strcmp(name, "global"))
     {
       compile(OP_GLOBAL);
+      discard(name);
     }
     else
     if (!strcmp(name, "local"))
     {
       compile(OP_LOCAL);
+      discard(name);
     }
     else
     if (!strcmp(name, "string"))
     {
       compile(OP_STRING);
+      discard(name);
     }
     else
     if (!strcmp(name, "array"))
     {
       compile(OP_ARRAY);
+      discard(name);
     }
     else
     if (!strcmp(name, "table"))
     {
       compile(OP_TABLE);
+      discard(name);
     }
     else
     if (!strcmp(name, "nil"))
     {
       compile(OP_NIL);
+      discard(name);
     }
     else
     if (!strcmp(name, "true"))
     {
       compile(OP_TRUE);
+      discard(name);
     }
     else
     if (!strcmp(name, "false"))
     {
       compile(OP_FALSE);
+      discard(name);
+    }
+    else
+    if (!strcmp(name, "routine"))
+    {
+      ensure(source[offset] == '(')
+        errorf("expected (: %s", &source[offset]);
+
+      offset++; // (
+      offset += parse(&source[offset], KEEP_RESULT);
+      offset += str_skip(&source[offset], isspace);
+
+      ensure(source[offset] == ')')
+        errorf("expected ): %s", &source[offset]);
+
+      offset++; // )
+      discard(name);
+
+      compile(OP_ROUTINE);
+    }
+    else
+    if (!strcmp(name, "resume"))
+    {
+      discard(name);
+
+      ensure(source[offset] == '(')
+        errorf("expected (: %s", &source[offset]);
+      offset++; // (
+
+      compile(OP_STACK);
+
+      for (;;)
+      {
+        offset += str_skip(&source[offset], isseparator);
+        if (source[offset] == ')') { offset++; break; }
+        offset += parse(&source[offset], KEEP_RESULT);
+      }
+
+      compile(OP_RESUME);
+      compile(OP_UNSTACK);
+    }
+    else
+    if (!strcmp(name, "yield"))
+    {
+      ensure(source[offset] == '(')
+        errorf("expected (: %s", &source[offset]);
+
+      offset++; // (
+
+      int argc = 0;
+      for (;;)
+      {
+        offset += str_skip(&source[offset], isseparator);
+        if (source[offset] == ')') { offset++; break; }
+        offset += parse(&source[offset], KEEP_RESULT);
+        argc++;
+      }
+
+      discard(name);
+      compile(OP_YIELD)->offset = argc;
     }
     else
     if (source[offset] == '(')
