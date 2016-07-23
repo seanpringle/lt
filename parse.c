@@ -316,14 +316,12 @@ parse_control (char *source, int results)
         push_int(code_count);
         compile(OP_JZ);
         push_int(BLOCK_WHILE);
-        //compile(OP_STACK);
         break;
 
       case BLOCK_FOR:
         mark = depth();
         push_int(code_count-1);
         push_int(BLOCK_FOR);
-        //compile(OP_STACK);
         break;
     }
 
@@ -668,7 +666,7 @@ parse (char *source, int results)
     return offset;
   }
 
-  compile(OP_FRAME);
+  compile(OP_MARK);
 
   int greedy = 1;
 
@@ -752,7 +750,7 @@ parse (char *source, int results)
   while (token_count > 0)
     compile(tokens[--token_count].operation);
 
-  compile(OP_UNFRAME)->offset = results;
+  compile(OP_LIMIT)->offset = results;
 
   return offset;
 }

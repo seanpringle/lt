@@ -113,8 +113,8 @@ func_t funcs[] = {
   [OP_SMUDGE] = { .name = "smudge", .func = op_smudge },
   [OP_UNSCOPE] = { .name = "unscope", .func = op_unscope },
   [OP_LITSCOPE] = { .name = "litscope", .func = op_litscope },
-  [OP_FRAME] = { .name = "frame", .func = op_frame },
-  [OP_UNFRAME] = { .name = "unframe", .func = op_unframe },
+  [OP_MARK] = { .name = "mark", .func = op_mark },
+  [OP_LIMIT] = { .name = "limit", .func = op_limit },
   [OP_TEST] = { .name = "test", .func = op_test },
   [OP_JMP] = { .name = "jmp", .func = op_jmp },
   [OP_JZ] = { .name = "jfalse", .func = op_jfalse },
@@ -554,7 +554,7 @@ compile (int op)
     return a;
   }
 
-  if (a && b && op == OP_UNFRAME && a->op == OP_LIT && b->op == OP_FRAME)
+  if (a && b && op == OP_LIMIT && a->op == OP_LIT && b->op == OP_MARK)
   {
     memmove(b, a, sizeof(code_t));
     code_count--;

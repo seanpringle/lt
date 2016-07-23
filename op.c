@@ -246,13 +246,13 @@ op_litscope ()
 }
 
 void
-op_frame ()
+op_mark ()
 {
   routine()->marks[routine()->mark_count++] = depth();
 }
 
 void
-op_unframe ()
+op_limit ()
 {
   int count = code[routine()->ip-1].offset;
   int old_depth = routine()->marks[routine()->mark_count-1];

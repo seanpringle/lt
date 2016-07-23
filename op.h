@@ -36,8 +36,8 @@ void op_unstack ();
 void op_litstack ();
 void op_unscope ();
 void op_litscope ();
-void op_frame ();
-void op_unframe ();
+void op_mark ();
+void op_limit ();
 void op_string ();
 void op_array ();
 void op_table ();
@@ -103,8 +103,8 @@ enum {
   OP_LITSTACK,
   OP_UNSCOPE,
   OP_LITSCOPE,
-  OP_FRAME,
-  OP_UNFRAME,
+  OP_MARK,
+  OP_LIMIT,
   OP_TEST,
   OP_JMP,
   OP_JZ,
