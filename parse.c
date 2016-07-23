@@ -474,6 +474,12 @@ parse_argument (char *source, int level)
       discard(name);
     }
     else
+    if (!strcmp(name, "self"))
+    {
+      compile(OP_SELF);
+      discard(name);
+    }
+    else
     if (!strcmp(name, "coroutine"))
     {
       ensure(source[offset] == '(')
@@ -500,7 +506,7 @@ parse_argument (char *source, int level)
         errorf("expected (: %s", &source[offset]);
       offset++; // (
 
-      compile(OP_STACK);
+      compile(OP_MARK);
 
       for (;;)
       {
@@ -510,7 +516,7 @@ parse_argument (char *source, int level)
       }
 
       compile(OP_RESUME);
-      compile(OP_UNSTACK);
+      compile(OP_LIMIT);
     }
     else
     if (!strcmp(name, "yield"))
@@ -543,7 +549,7 @@ parse_argument (char *source, int level)
         compile(OP_GET);
       }
 
-      compile(OP_STACK);
+      compile(OP_MARK);
 
       for (;;)
       {
@@ -561,7 +567,7 @@ parse_argument (char *source, int level)
         compile(OP_CALL_LIT)->ptr = name;
       }
 
-      compile(OP_UNSTACK)->offset = 1;
+      compile(OP_LIMIT)->offset = 1;
     }
     else
     {
@@ -569,33 +575,12 @@ parse_argument (char *source, int level)
       offset += str_skip(&source[offset], isspace);
       offset += parse_assign(&source[offset], level);
     }
-
-    offset += str_skip(&source[offset], isspace);
-
-    if (source[offset] == '.')
-    {
-      offset++;
-      offset += parse_argument(&source[offset], level+1);
-    }
-
-    offset += str_skip(&source[offset], isspace);
-
-    if (source[offset] == '[')
-    {
-      offset++;
-      offset += parse(&source[offset], 1);
-      offset += str_skip(&source[offset], isspace);
-      ensure(source[offset] == ']')
-        errorf("expected ]: %s", &source[offset]);
-      offset++;
-      offset += parse_assign(&source[offset], level+1);
-    }
   }
   else
   if (source[offset] == '[')
   {
     offset++;
-    compile(OP_STACK);
+    compile(OP_MARK);
 
     while (source[offset])
     {
@@ -605,6 +590,7 @@ parse_argument (char *source, int level)
     }
 
     compile(OP_LITSTACK);
+    compile(OP_LIMIT)->offset = 1;
   }
   else
   if (source[offset] == '{')
@@ -649,6 +635,39 @@ parse_argument (char *source, int level)
 
     compile(OP_LIT)->ptr = b > a ? (void*)to_dbl(nd): (void*)to_int(ni);
     offset += (b > a ? b: a)-start;
+  }
+
+  // level+1
+
+  offset += str_skip(&source[offset], isspace);
+
+  if (source[offset] == ':')
+  {
+    offset++;
+    compile(OP_SELF_PUSH);
+    offset += parse_argument(&source[offset], level+1);
+    compile(OP_SELF_DROP);
+  }
+
+  offset += str_skip(&source[offset], isspace);
+
+  if (source[offset] == '.')
+  {
+    offset++;
+    offset += parse_argument(&source[offset], level+1);
+  }
+
+  offset += str_skip(&source[offset], isspace);
+
+  if (source[offset] == '[')
+  {
+    offset++;
+    offset += parse(&source[offset], 1);
+    offset += str_skip(&source[offset], isspace);
+    ensure(source[offset] == ']')
+      errorf("expected ]: %s", &source[offset]);
+    offset++;
+    offset += parse_assign(&source[offset], level+1);
   }
 
   return offset;

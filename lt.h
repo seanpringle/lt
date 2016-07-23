@@ -47,8 +47,9 @@ typedef struct {
 } func_t;
 
 typedef struct {
-  vec_t *stacks;
+  vec_t *stack;
   vec_t *scopes;
+  vec_t *selves;
   int *calls;
   int call_count;
   int call_limit;
@@ -97,7 +98,6 @@ int64_t count (void*);
 int truth (void*);
 int less (void*,void*);
 void push (void*);
-void caller_push (void*);
 void push_bool (int);
 void push_int (int64_t);
 void push_dbl (double);
@@ -109,10 +109,10 @@ void* top ();
 void* under ();
 uint32_t hash (void*);
 vec_t* stack ();
-vec_t* caller_stack ();
 map_t* scope_reading ();
 map_t* scope_writing ();
-map_t* caller_scope ();
+void** item (int);
+void* self ();
 int depth ();
 void stacktrace ();
 code_t* compile (int);

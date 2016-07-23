@@ -1,4 +1,4 @@
-CFLAGS=-Wall -Werror -c -g -std=c99 -O0
+CFLAGS=-Wall -Werror -c -g -std=c99 -O2
 LDFLAGS=-lpcre
 
 all:
@@ -9,5 +9,4 @@ all:
 	gcc ${CFLAGS} -o map.o map.c
 	gcc ${CFLAGS} -o parse.o parse.c
 	gcc ${CFLAGS} -o lt.o lt.c
-	gcc -o lt arena.o op.o str.o vec.o map.o parse.o lt.o ${LDFLAGS}
-	valgrind ./lt test.lua
+	gcc -O2 -flto -o lt arena.o op.o str.o vec.o map.o parse.o lt.o ${LDFLAGS}

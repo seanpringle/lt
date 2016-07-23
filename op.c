@@ -45,9 +45,11 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 void
 op_print ()
 {
-  for (int i = 0; i < depth(); i++)
+  int items = depth();
+
+  for (int i = 0; i < items; i++)
   {
-    char *str = to_char(vec_get(stack(), i)[0]);
+    char *str = to_char(vec_get(stack(), stack()->count - items + i)[0]);
     fprintf(stream_output, "%s%s", i ? "\t": "", str);
     discard(str);
   }
@@ -66,54 +68,45 @@ op_coroutine ()
 void
 op_resume ()
 {
-  cor_t *cor = vec_get(stack(), 0)[0];
+  cor_t *cor = item(0)[0];
+  ensure(is_cor(cor)) errorf("%s not a cor_t", __func__);
 
   if (cor->state == COR_DEAD)
   {
-    caller_push(to_bool(0));
-    caller_push(strf("cannot resume dead coroutine"));
+    push(to_bool(0));
+    push(strf("cannot resume dead coroutine"));
+    discard(cor);
     return;
   }
 
-  if (!cor->stacks->count)
-  {
-    vec_push(cor->stacks)[0] = vec_incref(caller_stack());
-    vec_push(cor->stacks)[0] = vec_incref(vec_alloc());
-    vec_push(cor->scopes)[0] = map_incref(map_alloc());
-
-    for (int i = 1; i < stack()->count; i++)
-      vec_push(vec_get(cor->stacks, 0)[0])[0] = vec_get(stack(), i)[0];
-
-    stack()->count = 0;
-  }
-  else
-  {
-    vec_incref(caller_stack());
-    vec_set(cor->stacks, 0)[0] = caller_stack();
-    vec_push(vec_get(cor->stacks, cor->stacks->count-1)[0])[0] = NULL;
-  }
-
   cor->state = COR_RUNNING;
-  routines[routine_count++] = cor_incref(cor);
+
+  int items = depth();
+
+  for (int i = 1; i < items; i++)
+    vec_push(cor->stack)[0] = item(i)[0];
+
+  stack()->count -= depth();
+  routines[routine_count++] = cor;
 }
 
 void
 op_yield ()
 {
-  int count = code[routine()->ip-1].offset;
+  int items = depth();
 
-  for (int i = stack()->count-count; i < stack()->count; i++)
-  {
-    caller_push(vec_get(stack(), i)[0]);
-    vec_get(stack(), i)[0] = NULL;
-  }
+  cor_t *src = routine();
+  routine_count--;
+  cor_t *dst = routine();
 
-  stack()->count -= count;
+  for (int i = 0; i < items; i++)
+    push(vec_get(src->stack, src->stack->count - items + i)[0]);
 
-  if (!count)
-    caller_push(NULL);
+  src->stack->count -= items;
+  src->state = COR_SUSPENDED;
+  dst->marks[dst->mark_count-1] += items;
 
-  discard(routines[--routine_count]);
+  discard(src);
 }
 
 void
@@ -125,10 +118,16 @@ op_call ()
   {
     routine()->call_limit += 32;
     routine()->calls = heap_realloc(routine()->calls, sizeof(int) * routine()->call_limit);
+
+    ensure(routine()->calls)
+    {
+      stacktrace();
+      errorf("heap_realloc calls");
+    }
   }
 
+  void *ptr = pop();
   routine()->calls[routine()->call_count++] = routine()->ip;
-  void *ptr = vec_pop(caller_stack());
 
   ensure(is_int(ptr))
   {
@@ -188,12 +187,6 @@ op_lit ()
 }
 
 void
-op_stack ()
-{
-  vec_push(routine()->stacks)[0] = vec_incref(vec_alloc());
-}
-
-void
 op_scope ()
 {
   vec_push(routine()->scopes)[0] = map_incref(map_alloc());
@@ -206,29 +199,18 @@ op_smudge ()
 }
 
 void
-op_unstack ()
-{
-  int i = 0;
-  int count = code[routine()->ip-1].offset;
-
-  for (; i < count && i < depth(); i++)
-  {
-    caller_push(vec_get(stack(), i)[0]);
-    vec_get(stack(), i)[0] = NULL;
-  }
-
-  for (; i < count; i++)
-  {
-    caller_push(NULL);
-  }
-
-  discard(vec_pop(routine()->stacks));
-}
-
-void
 op_litstack ()
 {
-  push(vec_pop(routine()->stacks));
+  vec_t *vec = vec_incref(vec_alloc());
+  
+  int items = depth();
+
+  for (int i = 0; i < items; i++)
+    vec_push(vec)[0] = vec_get(stack(), stack()->count - items + i)[0];
+
+  stack()->count -= items;
+
+  push(vec);
 }
 
 void
@@ -248,7 +230,18 @@ op_litscope ()
 void
 op_mark ()
 {
-  routine()->marks[routine()->mark_count++] = depth();
+  if (routine()->mark_count == routine()->mark_limit)
+  {
+    routine()->mark_limit += 32;
+    routine()->marks = heap_realloc(routine()->marks, sizeof(int) * routine()->mark_limit);
+
+    ensure(routine()->marks)
+    {
+      stacktrace();
+      errorf("heap_realloc marks");
+    }
+  }
+  routine()->marks[routine()->mark_count++] = stack()->count;
 }
 
 void
@@ -257,10 +250,9 @@ op_limit ()
   int count = code[routine()->ip-1].offset;
   int old_depth = routine()->marks[routine()->mark_count-1];
   int req_depth = old_depth + count;
-  while (req_depth < depth()) op_drop();
-  while (req_depth > depth()) push(NULL);
-
   routine()->mark_count--;
+  while (req_depth < stack()->count) op_drop();
+  while (req_depth > stack()->count) push(NULL);
 }
 
 void
@@ -301,6 +293,24 @@ op_defnil ()
 }
 
 void
+op_self ()
+{
+  push(copy(self()));
+}
+
+void
+op_self_push ()
+{
+  vec_push(routine()->selves)[0] = top();
+}
+
+void
+op_self_drop ()
+{
+  discard(vec_pop(routine()->selves));
+}
+
+void
 op_nil ()
 {
   push(NULL);
@@ -327,7 +337,7 @@ op_drop ()
 void
 op_drop_all ()
 {
-  while(depth())
+  while(depth() > 0)
     op_drop();
 }
 
@@ -408,26 +418,28 @@ void
 op_keys ()
 {
   map_t *map = pop();
-  op_stack();
+  op_mark();
 
   for (int chain = 0; chain < 17; chain++)
     for (node_t *node = map->chains[chain]; node; node = node->next)
       push(copy(node->key));
 
   op_litstack();
+  routine()->mark_count--;
 }
 
 void
 op_values ()
 {
   map_t *map = pop();
-  op_stack();
+  op_mark();
 
   for (int chain = 0; chain < 17; chain++)
     for (node_t *node = map->chains[chain]; node; node = node->next)
       push(copy(node->val));
 
   op_litstack();
+  routine()->mark_count--;
 }
 
 void

@@ -29,10 +29,8 @@ void op_call ();
 void op_call_lit ();
 void op_return ();
 void op_lit ();
-void op_stack ();
 void op_scope ();
 void op_smudge ();
-void op_unstack ();
 void op_litstack ();
 void op_unscope ();
 void op_litscope ();
@@ -45,6 +43,9 @@ void op_global ();
 void op_local ();
 void op_defnil ();
 void op_nil ();
+void op_self ();
+void op_self_push ();
+void op_self_drop ();
 void op_true ();
 void op_false ();
 void op_drop ();
@@ -96,10 +97,8 @@ enum {
   OP_TABLE,
   OP_GLOBAL,
   OP_LOCAL,
-  OP_STACK,
   OP_SCOPE,
   OP_SMUDGE,
-  OP_UNSTACK,
   OP_LITSTACK,
   OP_UNSCOPE,
   OP_LITSCOPE,
@@ -114,6 +113,9 @@ enum {
   OP_KEYS,
   OP_VALUES,
   OP_NIL,
+  OP_SELF,
+  OP_SELF_PUSH,
+  OP_SELF_DROP,
   OP_TRUE,
   OP_FALSE,
   OP_DEFNIL,

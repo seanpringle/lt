@@ -106,8 +106,6 @@ func_t funcs[] = {
   [OP_TABLE] = { .name = "table", .func = op_table },
   [OP_GLOBAL] = { .name = "global", .func = op_global },
   [OP_LOCAL] = { .name = "local", .func = op_local },
-  [OP_STACK] = { .name = "stack", .func = op_stack },
-  [OP_UNSTACK] = { .name = "unstack", .func = op_unstack },
   [OP_LITSTACK] = { .name = "litstack", .func = op_litstack },
   [OP_SCOPE] = { .name = "scope", .func = op_scope },
   [OP_SMUDGE] = { .name = "smudge", .func = op_smudge },
@@ -123,6 +121,9 @@ func_t funcs[] = {
   [OP_KEYS] = { .name = "keys", .func = op_keys },
   [OP_VALUES] = { .name = "values", .func = op_values },
   [OP_NIL] = { .name = "nil", .func = op_nil },
+  [OP_SELF] = { .name = "self", .func = op_self },
+  [OP_SELF_PUSH] = { .name = "self_push", .func = op_self_push },
+  [OP_SELF_DROP] = { .name = "self_drop", .func = op_self_drop },
   [OP_TRUE] = { .name = "true", .func = op_true },
   [OP_FALSE] = { .name = "false", .func = op_false },
   [OP_DEFNIL] = { .name = "defnil", .func = op_defnil },
@@ -212,7 +213,8 @@ cor_alloc ()
   cor_t *cor = arena_alloc(cors, sizeof(cor_t));
   memset(cor, 0, sizeof(cor_t));
 
-  cor->stacks = vec_incref(vec_alloc());
+  cor->stack = vec_incref(vec_alloc());
+  cor->selves = vec_incref(vec_alloc());
   cor->scopes = vec_incref(vec_alloc());
   cor->call_count = 0;
   cor->call_limit = 32;
@@ -240,7 +242,7 @@ cor_decref (cor_t *cor)
 {
   if (--cor->ref_count == 0)
   {
-    vec_decref(cor->stacks);
+    vec_decref(cor->stack);
     vec_decref(cor->scopes);
     heap_free(cor->calls);
     memset(cor, 0, sizeof(cor_t));
@@ -393,13 +395,7 @@ to_char (void *ptr)
 vec_t*
 stack ()
 {
-  return vec_get(routine()->stacks, routine()->stacks->count-1)[0];
-}
-
-vec_t*
-caller_stack ()
-{
-  return vec_get(routine()->stacks, routine()->stacks->count-2)[0];
+  return routine()->stack;
 }
 
 map_t*
@@ -419,22 +415,28 @@ scope_reading ()
   return scope_global;
 }
 
+void*
+self ()
+{
+  return routine()->selves->count ? vec_get(routine()->selves, routine()->selves->count-1)[0]: NULL;
+}
+
 int
 depth ()
 {
-  return stack()->count;
+  return stack()->count - routine()->marks[routine()->mark_count-1];
+}
+
+void**
+item (int i)
+{
+  return vec_get(stack(), stack()->count - depth() + i);
 }
 
 void
 push (void *ptr)
 {
   vec_push(stack())[0] = ptr;
-}
-
-void
-caller_push (void *ptr)
-{
-  vec_push(caller_stack())[0] = ptr;
 }
 
 void
@@ -595,11 +597,16 @@ run ()
 {
   while (code[routine()->ip].op)
   {
-    //for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "  ");
-    //decompile(&code[routine()->ip]);
+//    for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "  ");
+//    decompile(&code[routine()->ip]);
+
     funcs[code[routine()->ip++].op].func();
-    //for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "  ");
-    //char *s = to_char(stack()); errorf("%s\n", s); discard(s);
+
+//    for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "  ");
+//    char *s = to_char(stack()); errorf("%s", s); discard(s);
+//    for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "  ");
+//    for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "%d ", routine()->marks[i]);
+//    fprintf(stderr, "\n\n");  
   }
 }
 
@@ -719,8 +726,8 @@ main (int argc, char const *argv[])
 
   routines[routine_count++] = cor_incref(cor_alloc());
 
-  op_stack();
-  op_scope();
+  op_mark();
+  //op_scope();
 
   for (int i = 0; i < sizeof(wrappers) / sizeof(struct wrapper); i++)
   {
