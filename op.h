@@ -36,6 +36,8 @@ void op_unstack ();
 void op_litstack ();
 void op_unscope ();
 void op_litscope ();
+void op_frame ();
+void op_unframe ();
 void op_string ();
 void op_array ();
 void op_table ();
@@ -46,6 +48,7 @@ void op_nil ();
 void op_true ();
 void op_false ();
 void op_drop ();
+void op_drop_all ();
 void op_test ();
 void op_jmp ();
 void op_jfalse ();
@@ -100,6 +103,8 @@ enum {
   OP_LITSTACK,
   OP_UNSCOPE,
   OP_LITSCOPE,
+  OP_FRAME,
+  OP_UNFRAME,
   OP_TEST,
   OP_JMP,
   OP_JZ,
@@ -123,6 +128,7 @@ enum {
   OP_GET,
   OP_GET_LIT,
   OP_DROP,
+  OP_DROP_ALL,
   OP_ADD,
   OP_ADD_LIT,
   OP_NEG,

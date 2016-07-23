@@ -27,9 +27,6 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define BLOCK_FOR 4
 #define BLOCK_IF 5
 
-#define KEEP_RESULT 0
-#define DROP_RESULT 1
-
 int isname (int);
 int isseparator (int);
 int islf (int);

@@ -95,7 +95,7 @@ skip_comment (char *source)
 }
 
 int
-parse_control (char *source, int drop)
+parse_control (char *source, int results)
 {
   int offset = str_skip(&source[0], isspace);
   offset += skip_comment(&source[offset]);
@@ -137,17 +137,15 @@ parse_control (char *source, int drop)
   if (peek(&source[offset], "return"))
   {
     offset += 6;
-    int argc = 0;
+    compile(OP_DROP_ALL);
     for (;;)
     {
-      offset += parse(&source[offset], KEEP_RESULT);
-      argc++;
-
+      offset += parse(&source[offset], 1);
       offset += str_skip(&source[offset], isspace);
       if (source[offset] != ',') break;
       offset++;
     }
-    compile(OP_RETURN)->offset = argc;
+    compile(OP_RETURN);
   }
   else
   if (peek(&source[offset], "function"))
@@ -212,7 +210,7 @@ parse_control (char *source, int drop)
     }
 
     while (depth() > mark)
-      offset += parse(&source[offset], DROP_RESULT);
+      offset += parse(&source[offset], 0);
   }
   else
   if (peek(&source[offset], "if"))
@@ -224,7 +222,7 @@ parse_control (char *source, int drop)
     push_int(BLOCK_IF);
 
     while (depth() > mark)
-      offset += parse(&source[offset], KEEP_RESULT);
+      offset += parse(&source[offset], 1);
   }
   else
   if (peek(&source[offset], "while"))
@@ -237,13 +235,13 @@ parse_control (char *source, int drop)
     push_int(BLOCK_WHILE);
 
     while (depth() > mark)
-      offset += parse(&source[offset], KEEP_RESULT);
+      offset += parse(&source[offset], 1);
   }
   else
   if (peek(&source[offset], "not"))
   {
     offset += 3;
-    offset += parse(&source[offset], KEEP_RESULT);
+    offset += parse(&source[offset], 1);
     compile(OP_NOT);
   }
   else
@@ -330,7 +328,7 @@ parse_control (char *source, int drop)
     }
 
     while (depth() > mark)
-      offset += parse(&source[offset], DROP_RESULT);
+      offset += parse(&source[offset], 0);
   }
   else
   if (peek(&source[offset], "else"))
@@ -365,7 +363,7 @@ parse_control (char *source, int drop)
     if (peek(&source[offset], "in"))
       offset += 2;
 
-    offset += parse(&source[offset], KEEP_RESULT);
+    offset += parse(&source[offset], 1);
     compile(OP_LIT)->ptr = to_int(0);
 
     push_int(code_count);
@@ -396,12 +394,12 @@ parse_assign (char *source, int level)
     {
       void *ptr = last->ptr;
       code_count--;
-      offset += parse(&source[offset], KEEP_RESULT);
+      offset += parse(&source[offset], 1);
       compile(OP_ASSIGN_LIT)->ptr = ptr;
     }
     else
     {
-      offset += parse(&source[offset], KEEP_RESULT);
+      offset += parse(&source[offset], 1);
       compile(level ? OP_SET: OP_ASSIGN);
     }
   }
@@ -484,7 +482,7 @@ parse_argument (char *source, int level)
         errorf("expected (: %s", &source[offset]);
 
       offset++; // (
-      offset += parse(&source[offset], KEEP_RESULT);
+      offset += parse(&source[offset], 1);
       offset += str_skip(&source[offset], isspace);
 
       ensure(source[offset] == ')')
@@ -510,7 +508,7 @@ parse_argument (char *source, int level)
       {
         offset += str_skip(&source[offset], isseparator);
         if (source[offset] == ')') { offset++; break; }
-        offset += parse(&source[offset], KEEP_RESULT);
+        offset += parse(&source[offset], 1);
       }
 
       compile(OP_RESUME);
@@ -529,7 +527,7 @@ parse_argument (char *source, int level)
       {
         offset += str_skip(&source[offset], isseparator);
         if (source[offset] == ')') { offset++; break; }
-        offset += parse(&source[offset], KEEP_RESULT);
+        offset += parse(&source[offset], 1);
         argc++;
       }
 
@@ -553,10 +551,8 @@ parse_argument (char *source, int level)
       {
         offset += str_skip(&source[offset], isseparator);
         if (source[offset] == ')') { offset++; break; }
-        offset += parse(&source[offset], KEEP_RESULT);
+        offset += parse(&source[offset], 1);
       }
-
-      compile(OP_SCOPE);
 
       if (level > 0)
       {
@@ -567,8 +563,7 @@ parse_argument (char *source, int level)
         compile(OP_CALL_LIT)->ptr = name;
       }
 
-      compile(OP_UNSCOPE);
-      compile(OP_UNSTACK);
+      compile(OP_UNSTACK)->offset = 1;
     }
     else
     {
@@ -590,7 +585,7 @@ parse_argument (char *source, int level)
     if (source[offset] == '[')
     {
       offset++;
-      offset += parse(&source[offset], KEEP_RESULT);
+      offset += parse(&source[offset], 1);
       offset += str_skip(&source[offset], isspace);
       ensure(source[offset] == ']')
         errorf("expected ]: %s", &source[offset]);
@@ -608,7 +603,7 @@ parse_argument (char *source, int level)
     {
       offset += str_skip(&source[offset], isseparator);
       if (source[offset] == ']') { offset++; break; }
-      offset += parse(&source[offset], KEEP_RESULT);
+      offset += parse(&source[offset], 1);
     }
 
     compile(OP_LITSTACK);
@@ -619,17 +614,14 @@ parse_argument (char *source, int level)
     offset++;
     compile(OP_SCOPE);
     compile(OP_SMUDGE);
-    compile(OP_STACK);
 
     while (source[offset])
     {
       offset += str_skip(&source[offset], isseparator);
       if (source[offset] == '}') { offset++; break; }
-      offset += parse(&source[offset], KEEP_RESULT);
-      compile(OP_DROP);
+      offset += parse(&source[offset], 0);
     }
 
-    compile(OP_UNSTACK);
     compile(OP_LITSCOPE);
   }
   else
@@ -643,7 +635,7 @@ parse_argument (char *source, int level)
   if (source[offset] == '#')
   {
     offset++;
-    offset += parse(&source[offset], KEEP_RESULT);
+    offset += parse(&source[offset], 1);
     compile(OP_COUNT);
   }
   else
@@ -665,16 +657,18 @@ parse_argument (char *source, int level)
 }
 
 int
-parse (char *source, int drop)
+parse (char *source, int results)
 {
   int offset = str_skip(&source[0], isspace);
   offset += skip_comment(&source[offset]);
 
   if (peek_control(&source[offset]))
   {
-    offset += parse_control(&source[offset], drop);
+    offset += parse_control(&source[offset], results);
     return offset;
   }
+
+  compile(OP_FRAME);
 
   int greedy = 1;
 
@@ -699,7 +693,7 @@ parse (char *source, int drop)
     if (source[offset] == '(')
     {
       offset++;
-      offset += parse(&source[offset], KEEP_RESULT);
+      offset += parse(&source[offset], 1);
       ensure(source[offset] == ')')
         errorf("expected closing paren: %s", &source[offset]);
       offset++;
@@ -758,8 +752,7 @@ parse (char *source, int drop)
   while (token_count > 0)
     compile(tokens[--token_count].operation);
 
-  if (drop)
-    compile(OP_DROP);
+  compile(OP_UNFRAME)->offset = results;
 
   return offset;
 }
@@ -770,5 +763,5 @@ source (char *s)
   int offset = 0;
 
   while (s[offset])
-    offset += parse(&s[offset], DROP_RESULT);
+    offset += parse(&s[offset], 0);
 }

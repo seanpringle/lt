@@ -56,6 +56,9 @@ typedef struct {
   int flags;
   int ref_count;
   int state;
+  int *marks;
+  int mark_count;
+  int mark_limit;
 } cor_t;
 
 #define COR_SUSPENDED 0

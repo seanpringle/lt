@@ -53,8 +53,6 @@ op_print ()
   }
   fprintf(stream_output, "\n");
   fflush(stream_output);
-
-  while (depth()) op_drop();
 }
 
 void
@@ -121,6 +119,8 @@ op_yield ()
 void
 op_call ()
 {
+  op_scope();
+
   if (routine()->call_count == routine()->call_limit)
   {
     routine()->call_limit += 32;
@@ -143,6 +143,8 @@ op_call ()
 void
 op_call_lit ()
 {
+  op_scope();
+
   if (routine()->call_count == routine()->call_limit)
   {
     routine()->call_limit += 32;
@@ -167,23 +169,14 @@ op_call_lit ()
 void
 op_return ()
 {
+  op_unscope();
+
   if (routine()->call_count == 0)
   {
     routine()->state = COR_DEAD;
     op_yield();
     return;
   }
-
-  int count = code[routine()->ip-1].offset;
-
-  for (int i = 0; i < count; i++)
-  {
-    caller_push(vec_get(stack(), i)[0]);
-    vec_get(stack(), i)[0] = NULL;
-  }
-
-  if (!count)
-    caller_push(NULL);
 
   routine()->ip = routine()->calls[--routine()->call_count];
 }
@@ -215,6 +208,20 @@ op_smudge ()
 void
 op_unstack ()
 {
+  int i = 0;
+  int count = code[routine()->ip-1].offset;
+
+  for (; i < count && i < depth(); i++)
+  {
+    caller_push(vec_get(stack(), i)[0]);
+    vec_get(stack(), i)[0] = NULL;
+  }
+
+  for (; i < count; i++)
+  {
+    caller_push(NULL);
+  }
+
   discard(vec_pop(routine()->stacks));
 }
 
@@ -236,6 +243,24 @@ op_litscope ()
   map_t *map = vec_pop(routine()->scopes);
   map->flags &= ~MAP_SMUDGED;
   push(map);
+}
+
+void
+op_frame ()
+{
+  routine()->marks[routine()->mark_count++] = depth();
+}
+
+void
+op_unframe ()
+{
+  int count = code[routine()->ip-1].offset;
+  int old_depth = routine()->marks[routine()->mark_count-1];
+  int req_depth = old_depth + count;
+  while (req_depth < depth()) op_drop();
+  while (req_depth > depth()) push(NULL);
+
+  routine()->mark_count--;
 }
 
 void
@@ -297,6 +322,13 @@ void
 op_drop ()
 {
   discard(pop());
+}
+
+void
+op_drop_all ()
+{
+  while(depth())
+    op_drop();
 }
 
 void

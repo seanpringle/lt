@@ -113,6 +113,8 @@ func_t funcs[] = {
   [OP_SMUDGE] = { .name = "smudge", .func = op_smudge },
   [OP_UNSCOPE] = { .name = "unscope", .func = op_unscope },
   [OP_LITSCOPE] = { .name = "litscope", .func = op_litscope },
+  [OP_FRAME] = { .name = "frame", .func = op_frame },
+  [OP_UNFRAME] = { .name = "unframe", .func = op_unframe },
   [OP_TEST] = { .name = "test", .func = op_test },
   [OP_JMP] = { .name = "jmp", .func = op_jmp },
   [OP_JZ] = { .name = "jfalse", .func = op_jfalse },
@@ -135,6 +137,7 @@ func_t funcs[] = {
   [OP_GET_LIT] = { .name = "get_lit", .func = op_get_lit },
   [OP_INHERIT] = { .name = "inherit", .func = op_inherit },
   [OP_DROP] = { .name = "drop", .func = op_drop },
+  [OP_DROP_ALL] = { .name = "drop_all", .func = op_drop_all },
   [OP_ADD] = { .name = "add", .func = op_add },
   [OP_ADD_LIT] = { .name = "add_lit", .func = op_add_lit },
   [OP_NEG] = { .name = "neg", .func = op_neg },
@@ -214,6 +217,9 @@ cor_alloc ()
   cor->call_count = 0;
   cor->call_limit = 32;
   cor->calls = heap_alloc(sizeof(int) * cor->call_limit);
+  cor->mark_count = 0;
+  cor->mark_limit = 32;
+  cor->marks = heap_alloc(sizeof(int) * cor->mark_limit);
   cor->ref_count = 0;
   cor->flags = 0;
   cor->ip = 0;
@@ -515,36 +521,44 @@ under ()
 code_t*
 hindsight (int offset)
 {
-  return &code[code_count+offset];
+  return &code[code_count+offset] >= code ? &code[code_count+offset]: NULL;
 }
 
 code_t*
 compile (int op)
 {
-  code_t *last = hindsight(-1);
+  code_t *b = hindsight(-2);
+  code_t *a = hindsight(-1);
 
-  if (op == OP_FIND && last->op == OP_LIT)
+  if (a && op == OP_FIND && a->op == OP_LIT)
   {
-    last->op = OP_FIND_LIT;
-    return last;
+    a->op = OP_FIND_LIT;
+    return a;
   }
 
-  if (op == OP_GET && last->op == OP_LIT)
+  if (a && op == OP_GET && a->op == OP_LIT)
   {
-    last->op = OP_GET_LIT;
-    return last;
+    a->op = OP_GET_LIT;
+    return a;
   }
 
-  if (op == OP_ADD && last->op == OP_LIT)
+  if (a && op == OP_ADD && a->op == OP_LIT)
   {
-    last->op = OP_ADD_LIT;
-    return last;
+    a->op = OP_ADD_LIT;
+    return a;
   }
 
-  if (op == OP_LT && last->op == OP_LIT)
+  if (a && op == OP_LT && a->op == OP_LIT)
   {
-    last->op = OP_LT_LIT;
-    return last;
+    a->op = OP_LT_LIT;
+    return a;
+  }
+
+  if (a && b && op == OP_UNFRAME && a->op == OP_LIT && b->op == OP_FRAME)
+  {
+    memmove(b, a, sizeof(code_t));
+    code_count--;
+    return b;
   }
 
   if (code_count == code_limit)
@@ -581,9 +595,11 @@ run ()
 {
   while (code[routine()->ip].op)
   {
-//    decompile(&code[routine()->ip]);
+    //for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "  ");
+    //decompile(&code[routine()->ip]);
     funcs[code[routine()->ip++].op].func();
-//    char *s = to_char(stack()); errorf("%s\n", s); discard(s);
+    //for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "  ");
+    //char *s = to_char(stack()); errorf("%s\n", s); discard(s);
   }
 }
 
@@ -629,6 +645,7 @@ slurp ()
 int
 main (int argc, char const *argv[])
 {
+  char *script = NULL;
   heap_mem = 8*MB;
 
   for (int argi = 0; argi < argc; argi++)
@@ -638,7 +655,12 @@ main (int argc, char const *argv[])
       heap_mem = strtoll(argv[++argi], NULL, 0) * MB;
       continue;
     }
+
+    script = (char*)argv[argi];
   }
+
+  ensure(script)
+    errorf("expected script");
 
   if (heap_mem < 1*MB)
   {
@@ -705,7 +727,7 @@ main (int argc, char const *argv[])
     char *name = substr(wrappers[i].name, 0, strlen(wrappers[i].name));
     map_set(wrappers[i].library[0], name)[0] = to_int(code_count);
     compile(wrappers[i].op);
-    compile(OP_RETURN)->offset = wrappers[i].results;
+    compile(OP_RETURN);
     discard(name);
   }
 
@@ -713,6 +735,10 @@ main (int argc, char const *argv[])
 
   push(strf("%s", argv[1]));
   slurp();
+
+  ensure(top())
+    errorf("failed to read %s", script);
+
   source(top());
   op_drop();
 
