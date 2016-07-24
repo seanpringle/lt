@@ -26,7 +26,6 @@ void op_coroutine ();
 void op_resume ();
 void op_yield ();
 void op_call ();
-void op_call_lit ();
 void op_return ();
 void op_lit ();
 void op_scope ();
@@ -46,6 +45,7 @@ void op_nil ();
 void op_self ();
 void op_self_push ();
 void op_self_drop ();
+void op_shunt ();
 void op_true ();
 void op_false ();
 void op_drop ();
@@ -90,7 +90,7 @@ enum {
   OP_RESUME,
   OP_YIELD,
   OP_CALL,
-  OP_CALL_LIT,
+  OP_CALL_OTHER,
   OP_RETURN,
   OP_STRING,
   OP_ARRAY,
@@ -116,6 +116,7 @@ enum {
   OP_SELF,
   OP_SELF_PUSH,
   OP_SELF_DROP,
+  OP_SHUNT,
   OP_TRUE,
   OP_FALSE,
   OP_DEFNIL,

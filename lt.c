@@ -99,7 +99,6 @@ func_t funcs[] = {
   [OP_RESUME] = { .name = "resume", .func = op_resume },
   [OP_YIELD] = { .name = "yield", .func = op_yield },
   [OP_CALL] = { .name = "call", .func = op_call },
-  [OP_CALL_LIT] = { .name = "call_lit", .func = op_call_lit },
   [OP_RETURN] = { .name = "return", .func = op_return },
   [OP_STRING] = { .name = "string", .func = op_string },
   [OP_ARRAY] = { .name = "array", .func = op_array },
@@ -124,6 +123,7 @@ func_t funcs[] = {
   [OP_SELF] = { .name = "self", .func = op_self },
   [OP_SELF_PUSH] = { .name = "self_push", .func = op_self_push },
   [OP_SELF_DROP] = { .name = "self_drop", .func = op_self_drop },
+  [OP_SHUNT] = { .name = "shunt", .func = op_shunt },
   [OP_TRUE] = { .name = "true", .func = op_true },
   [OP_FALSE] = { .name = "false", .func = op_false },
   [OP_DEFNIL] = { .name = "defnil", .func = op_defnil },
@@ -214,6 +214,7 @@ cor_alloc ()
   memset(cor, 0, sizeof(cor_t));
 
   cor->stack = vec_incref(vec_alloc());
+  cor->other = vec_incref(vec_alloc());
   cor->selves = vec_incref(vec_alloc());
   cor->scopes = vec_incref(vec_alloc());
   cor->call_count = 0;
@@ -243,6 +244,8 @@ cor_decref (cor_t *cor)
   if (--cor->ref_count == 0)
   {
     vec_decref(cor->stack);
+    vec_decref(cor->other);
+    vec_decref(cor->selves);
     vec_decref(cor->scopes);
     heap_free(cor->calls);
     memset(cor, 0, sizeof(cor_t));
@@ -532,6 +535,15 @@ compile (int op)
   code_t *b = hindsight(-2);
   code_t *a = hindsight(-1);
 
+  // frames
+
+  if (a && b && op == OP_LIMIT && a->op == OP_LIT && b->op == OP_MARK)
+  {
+    memmove(b, a, sizeof(code_t));
+    code_count--;
+    return b;
+  }
+
   if (a && op == OP_FIND && a->op == OP_LIT)
   {
     a->op = OP_FIND_LIT;
@@ -544,6 +556,8 @@ compile (int op)
     return a;
   }
 
+  // math
+
   if (a && op == OP_ADD && a->op == OP_LIT)
   {
     a->op = OP_ADD_LIT;
@@ -554,13 +568,6 @@ compile (int op)
   {
     a->op = OP_LT_LIT;
     return a;
-  }
-
-  if (a && b && op == OP_LIMIT && a->op == OP_LIT && b->op == OP_MARK)
-  {
-    memmove(b, a, sizeof(code_t));
-    code_count--;
-    return b;
   }
 
   if (code_count == code_limit)

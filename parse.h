@@ -36,5 +36,5 @@ int skip_comment (char*);
 int parse (char*, int);
 int parse_control (char*, int);
 int parse_argument (char*, int);
-int parse_assign (char*, int);
+int parse_arglist (char*, int*);
 void source (char*);

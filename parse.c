@@ -95,6 +95,29 @@ skip_comment (char *source)
 }
 
 int
+parse_arglist (char *source, int *count)
+{
+  int argc = 0;
+  int offset = str_skip(&source[0], isspace);
+  
+  ensure(source[offset] == '(')
+    errorf("expected arglist paren: %s", &source[offset]);
+  
+  offset++;
+
+  for (;;)
+  {
+    offset += str_skip(&source[offset], isseparator);
+    if (source[offset] == ')') { offset++; break; }
+    offset += parse(&source[offset], 1);
+    argc++;
+  }
+  if (count)
+    *count = argc;
+  return offset; 
+}
+
+int
 parse_control (char *source, int results)
 {
   int offset = str_skip(&source[0], isspace);
@@ -377,39 +400,6 @@ parse_control (char *source, int results)
 }
 
 int
-parse_assign (char *source, int level)
-{
-  int offset = 0;
-
-  offset += str_skip(&source[offset], isspace);
-
-  if (source[offset] == '=')
-  {
-    offset++;
-
-    code_t *last = hindsight(-1);
-    if (!level && last->op == OP_LIT)
-    {
-      void *ptr = last->ptr;
-      code_count--;
-      offset += parse(&source[offset], 1);
-      compile(OP_ASSIGN_LIT)->ptr = ptr;
-    }
-    else
-    {
-      offset += parse(&source[offset], 1);
-      compile(level ? OP_SET: OP_ASSIGN);
-    }
-  }
-  else
-  {
-    compile(level ? OP_GET: OP_FIND);
-  }
-
-  return offset;
-}
-
-int
 parse_argument (char *source, int level)
 {
   int offset = str_skip(&source[0], isspace);
@@ -482,98 +472,31 @@ parse_argument (char *source, int level)
     else
     if (!strcmp(name, "coroutine"))
     {
-      ensure(source[offset] == '(')
-        errorf("expected (: %s", &source[offset]);
-
-      offset++; // (
-      offset += parse(&source[offset], 1);
-      offset += str_skip(&source[offset], isspace);
-
-      ensure(source[offset] == ')')
-        errorf("expected ): %s", &source[offset]);
-
-      offset++; // )
-      discard(name);
-
+      offset += parse_arglist(&source[offset], NULL);
       compile(OP_COROUTINE);
+      discard(name);
     }
     else
     if (!strcmp(name, "resume"))
     {
-      discard(name);
-
-      ensure(source[offset] == '(')
-        errorf("expected (: %s", &source[offset]);
-      offset++; // (
-
       compile(OP_MARK);
-
-      for (;;)
-      {
-        offset += str_skip(&source[offset], isseparator);
-        if (source[offset] == ')') { offset++; break; }
-        offset += parse(&source[offset], 1);
-      }
-
+      offset += parse_arglist(&source[offset], NULL);
       compile(OP_RESUME);
       compile(OP_LIMIT);
+      discard(name);
     }
     else
     if (!strcmp(name, "yield"))
     {
-      ensure(source[offset] == '(')
-        errorf("expected (: %s", &source[offset]);
-
-      offset++; // (
-
       int argc = 0;
-      for (;;)
-      {
-        offset += str_skip(&source[offset], isseparator);
-        if (source[offset] == ')') { offset++; break; }
-        offset += parse(&source[offset], 1);
-        argc++;
-      }
-
-      discard(name);
+      offset += parse_arglist(&source[offset], &argc);
       compile(OP_YIELD)->offset = argc;
-    }
-    else
-    if (source[offset] == '(')
-    {
-      offset++;
-
-      if (level > 0)
-      {
-        compile(OP_LIT)->ptr = name;
-        compile(OP_GET);
-      }
-
-      compile(OP_MARK);
-
-      for (;;)
-      {
-        offset += str_skip(&source[offset], isseparator);
-        if (source[offset] == ')') { offset++; break; }
-        offset += parse(&source[offset], 1);
-      }
-
-      if (level > 0)
-      {
-        compile(OP_CALL);
-      }
-      else
-      {
-        compile(OP_CALL_LIT)->ptr = name;
-      }
-
-      compile(OP_LIMIT)->offset = 1;
+      discard(name);
     }
     else
     {
       compile(OP_LIT)->ptr = name;
-      offset += str_skip(&source[offset], isspace);
-      offset += parse_assign(&source[offset], level);
+      compile(level ? OP_GET: OP_FIND);
     }
   }
   else
@@ -639,35 +562,84 @@ parse_argument (char *source, int level)
 
   // level+1
 
-  offset += str_skip(&source[offset], isspace);
-
-  if (source[offset] == ':')
+  for (;;)
   {
-    offset++;
-    compile(OP_SELF_PUSH);
-    offset += parse_argument(&source[offset], level+1);
-    compile(OP_SELF_DROP);
-  }
-
-  offset += str_skip(&source[offset], isspace);
-
-  if (source[offset] == '.')
-  {
-    offset++;
-    offset += parse_argument(&source[offset], level+1);
-  }
-
-  offset += str_skip(&source[offset], isspace);
-
-  if (source[offset] == '[')
-  {
-    offset++;
-    offset += parse(&source[offset], 1);
     offset += str_skip(&source[offset], isspace);
-    ensure(source[offset] == ']')
-      errorf("expected ]: %s", &source[offset]);
-    offset++;
-    offset += parse_assign(&source[offset], level+1);
+
+    if (source[offset] == ':')
+    {
+      offset++;
+      compile(OP_SELF_PUSH);
+      offset += parse_argument(&source[offset], level+1);
+      compile(OP_SELF_DROP);
+      continue;
+    }
+
+    offset += str_skip(&source[offset], isspace);
+
+    if (source[offset] == '.')
+    {
+      offset++;
+      offset += parse_argument(&source[offset], level+1);
+      continue;
+    }
+
+    offset += str_skip(&source[offset], isspace);
+
+    if (source[offset] == '[')
+    {
+      offset++;
+      offset += parse(&source[offset], 1);
+      offset += str_skip(&source[offset], isspace);
+      ensure(source[offset] == ']')
+        errorf("expected ]: %s", &source[offset]);
+      offset++;
+      compile(level ? OP_GET: OP_FIND);
+      continue;
+    }
+
+    if (source[offset] == '(')
+    {
+      compile(OP_SHUNT);
+      compile(OP_MARK);
+      offset += parse_arglist(&source[offset], NULL);
+      compile(OP_CALL);
+      compile(OP_LIMIT)->offset = 1;
+      continue;
+    }
+
+    if (source[offset] == '=')
+    {
+      offset++;
+
+      code_t *last = hindsight(-1);
+      void *item = NULL;
+
+      switch (last->op)
+      {
+        case OP_GET:
+          code_count--;
+          offset += parse(&source[offset], 1);
+          compile(OP_SET);
+          break;
+        case OP_FIND:
+          code_count--;
+          offset += parse(&source[offset], 1);
+          compile(OP_ASSIGN);
+          break;
+        case OP_FIND_LIT:
+          item = last->ptr;
+          code_count--;
+          offset += parse(&source[offset], 1);
+          compile(OP_ASSIGN_LIT)->ptr = item;
+          break;
+        default:
+          errorf("assignment opcode mismatch");
+          abort();
+      }
+    }
+
+    break;
   }
 
   return offset;

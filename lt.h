@@ -48,6 +48,7 @@ typedef struct {
 
 typedef struct {
   vec_t *stack;
+  vec_t *other;
   vec_t *scopes;
   vec_t *selves;
   int *calls;

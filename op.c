@@ -126,7 +126,7 @@ op_call ()
     }
   }
 
-  void *ptr = pop();
+  void *ptr = vec_pop(routine()->other);
   routine()->calls[routine()->call_count++] = routine()->ip;
 
   ensure(is_int(ptr))
@@ -137,32 +137,6 @@ op_call ()
 
   routine()->ip = get_int(ptr);
   discard(ptr);
-}
-
-void
-op_call_lit ()
-{
-  op_scope();
-
-  if (routine()->call_count == routine()->call_limit)
-  {
-    routine()->call_limit += 32;
-    routine()->calls = heap_realloc(routine()->calls, sizeof(int) * routine()->call_limit);
-  }
-
-  routine()->calls[routine()->call_count++] = routine()->ip;
-
-  void **ptr = map_get(scope_reading(), code[routine()->ip-1].ptr);
-  if (!ptr) ptr = map_get(scope_global, code[routine()->ip-1].ptr);
-  if (!ptr) ptr = map_get(scope_core, code[routine()->ip-1].ptr);
-
-  ensure(ptr)
-  {
-    errorf("unknown name: %s", (char*)code[routine()->ip-1].ptr);
-    stacktrace();
-  }
-
-  routine()->ip = get_int(ptr[0]);
 }
 
 void
@@ -308,6 +282,12 @@ void
 op_self_drop ()
 {
   discard(vec_pop(routine()->selves));
+}
+
+void
+op_shunt ()
+{
+  vec_push(routine()->other)[0] = pop();
 }
 
 void
