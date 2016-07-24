@@ -1,0 +1,16 @@
+for i in 100 do
+
+  output = i
+
+  if i % 3 == 0 then
+    output = "Fizz"
+  end
+  if i % 5 == 0 then
+    output = "Buzz"
+  end
+  if i % 15 == 0 then
+    output = "FizzBuzz"
+  end
+
+  print(output)
+end
