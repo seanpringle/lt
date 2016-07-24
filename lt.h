@@ -119,6 +119,7 @@ void stacktrace ();
 code_t* compile (int);
 code_t* hindsight (int);
 cor_t* routine ();
+void decompile (code_t*);
 cor_t* cor_alloc ();
 cor_t* cor_incref ();
 cor_t* cor_decref ();

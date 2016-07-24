@@ -143,13 +143,11 @@ parse_control (char *source, int results)
         break;
 
       case BLOCK_WHILE:
-        //compile(OP_UNSTACK);
         compile(OP_JMP)->offset = pop_int();
         code[branch].offset = code_count;
         break;
 
       case BLOCK_FOR:
-        //compile(OP_UNSTACK);
         compile(OP_JMP)->offset = pop_int();
         code[branch].offset = code_count;
         compile(OP_DROP);
@@ -239,6 +237,7 @@ parse_control (char *source, int results)
   if (peek(&source[offset], "if"))
   {
     offset += 2;
+    
     int mark = depth();
 
     push_int(0);
@@ -304,7 +303,6 @@ parse_control (char *source, int results)
     ensure(pop_int() == BLOCK_IF)
       errorf("unexpected 'then': %s", &source[offset-4]);
 
-    pop_int();
     int count = pop_int();
 
     while (count-- > 0)
@@ -342,8 +340,10 @@ parse_control (char *source, int results)
         break;
 
       case BLOCK_FOR:
+        count = pop_int();
         mark = depth();
-        push_int(code_count-1);
+        push_int(count);
+        push_int(count);
         push_int(BLOCK_FOR);
         break;
     }
@@ -387,9 +387,13 @@ parse_control (char *source, int results)
     offset += parse(&source[offset], 1);
     compile(OP_LIT)->ptr = to_int(0);
 
+    int mark = depth();
     push_int(code_count);
     compile(OP_FOR)->ptr = key;
     push_int(BLOCK_FOR);
+
+    while (depth() > mark)
+      offset += parse(&source[offset], 0);
   }
   else
   {
@@ -608,7 +612,7 @@ parse_argument (char *source, int level)
       continue;
     }
 
-    if (source[offset] == '=')
+    if (source[offset] == '=' && source[offset+1] != '=')
     {
       offset++;
 
@@ -619,6 +623,11 @@ parse_argument (char *source, int level)
       {
         case OP_GET:
           code_count--;
+          offset += parse(&source[offset], 1);
+          compile(OP_SET);
+          break;
+        case OP_GET_LIT:
+          last->op = OP_LIT;
           offset += parse(&source[offset], 1);
           compile(OP_SET);
           break;
@@ -653,7 +662,11 @@ parse (char *source, int results)
 
   if (peek_control(&source[offset]))
   {
+    if (!results)
+      compile(OP_MARK);
     offset += parse_control(&source[offset], results);
+    if (!results)
+      compile(OP_LIMIT)->offset = results;
     return offset;
   }
 
@@ -713,6 +726,7 @@ parse (char *source, int results)
       { .name = "-",  .operation = OP_SUB,    .precedence = 1 },
       { .name = "*",  .operation = OP_MUL,    .precedence = 2 },
       { .name = "/",  .operation = OP_DIV,    .precedence = 2 },
+      { .name = "%",  .operation = OP_MOD,    .precedence = 2 },
     };
 
     if (!ispunct(source[offset])) break;

@@ -94,6 +94,7 @@ int code_limit;
 FILE *stream_output;
 
 func_t funcs[] = {
+  [OP_NOP] = { .name = "nop", .func = op_nop },
   [OP_PRINT] = { .name = "print", .func = op_print },
   [OP_COROUTINE] = { .name = "coroutine", .func = op_coroutine },
   [OP_RESUME] = { .name = "resume", .func = op_resume },
@@ -145,6 +146,7 @@ func_t funcs[] = {
   [OP_SUB] = { .name = "sub", .func = op_sub },
   [OP_MUL] = { .name = "mul", .func = op_mul },
   [OP_DIV] = { .name = "div", .func = op_div },
+  [OP_MOD] = { .name = "mod", .func = op_mod },
   [OP_NOT] = { .name = "not", .func = op_not },
   [OP_EQ] = { .name = "eq", .func = op_eq },
   [OP_LT] = { .name = "lt", .func = op_lt },
@@ -580,6 +582,9 @@ compile (int op)
   code_t *c = &code[code_count++];
   memset(c, 0, sizeof(code_t));
   c->op = op;
+
+  code[code_count].op = 0;
+
   return c;
 }
 
@@ -607,7 +612,8 @@ run ()
 //    for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "  ");
 //    decompile(&code[routine()->ip]);
 
-    funcs[code[routine()->ip++].op].func();
+    int op = code[routine()->ip++].op;
+    if (op != OP_NOP) funcs[op].func();
 
 //    for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "  ");
 //    char *s = to_char(stack()); errorf("%s", s); discard(s);

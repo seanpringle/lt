@@ -21,6 +21,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
+void op_nop ();
 void op_print ();
 void op_coroutine ();
 void op_resume ();
@@ -72,6 +73,7 @@ void op_neg ();
 void op_sub ();
 void op_mul ();
 void op_div ();
+void op_mod ();
 void op_eq ();
 void op_lt ();
 void op_lt_lit ();
@@ -85,7 +87,8 @@ void op_match ();
 void op_status ();
 
 enum {
-  OP_PRINT=1,
+  OP_NOP=1,
+  OP_PRINT,
   OP_COROUTINE,
   OP_RESUME,
   OP_YIELD,
@@ -138,6 +141,7 @@ enum {
   OP_SUB,
   OP_MUL,
   OP_DIV,
+  OP_MOD,
   OP_NOT,
   OP_EQ,
   OP_LT,

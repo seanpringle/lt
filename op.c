@@ -43,6 +43,12 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "lt.h"
 
 void
+op_nop ()
+{
+
+}
+
+void
 op_print ()
 {
   int items = depth();
@@ -275,7 +281,7 @@ op_self ()
 void
 op_self_push ()
 {
-  vec_push(routine()->selves)[0] = top();
+  vec_push(routine()->selves)[0] = copy(top());
 }
 
 void
@@ -503,6 +509,12 @@ op_get ()
   void *key = pop();
   void *src = pop();
 
+  if (is_str(src) && is_str(key))
+  {
+    void **ptr = map_get(super_str, key);
+    push(ptr ? copy(ptr[0]): NULL);
+  }
+  else
   if (is_vec(src) && is_int(key))
   {
     void **ptr = vec_get(src, get_int(key));
@@ -527,6 +539,12 @@ op_get_lit ()
   void *key = code[routine()->ip-1].ptr;
   void *src = pop();
 
+  if (is_str(src) && is_str(key))
+  {
+    void **ptr = map_get(super_str, key);
+    push(ptr ? copy(ptr[0]): NULL);
+  }
+  else
   if (is_vec(src) && is_int(key))
   {
     void **ptr = vec_get(src, get_int(key));
@@ -619,6 +637,18 @@ op_div ()
   else
   if (is_dbl(under()))
     { double b = pop_dbl(), a = pop_dbl(); push_dbl(a/b); }
+  else
+  {
+    stacktrace();
+    abort();
+  }
+}
+
+void
+op_mod ()
+{
+  if (is_int(under()))
+    { int64_t b = pop_int(), a = pop_int(); push_int(a%b); }
   else
   {
     stacktrace();
