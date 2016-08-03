@@ -21,20 +21,21 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-#define BLOCK_FUNC 1
-#define BLOCK_BRANCH 2
-#define BLOCK_WHILE 3
-#define BLOCK_FOR 4
-#define BLOCK_IF 5
+enum {
+  EXPR_VAR=1,
+  EXPR_LIT
+};
+
+typedef struct {
+  int type;
+  int call;
+  int args;
+  void *item;
+  char *source;
+} expr_t;
 
 int isname (int);
-int isseparator (int);
 int islf (int);
-int peek (char*, char*);
-int peek_control (char*);
-int skip_comment (char*);
+int skip (char*);
 int parse (char*, int);
-int parse_control (char*, int);
-int parse_argument (char*, int);
-int parse_arglist (char*, int*);
 void source (char*);

@@ -132,7 +132,7 @@ op_call ()
     }
   }
 
-  void *ptr = vec_pop(routine()->other);
+  void *ptr = pop();
   routine()->calls[routine()->call_count++] = routine()->ip;
 
   ensure(is_int(ptr))
@@ -143,6 +143,13 @@ op_call ()
 
   routine()->ip = get_int(ptr);
   discard(ptr);
+}
+
+void
+op_call_lit ()
+{
+  op_find_lit();
+  op_call();
 }
 
 void
@@ -182,7 +189,7 @@ void
 op_litstack ()
 {
   vec_t *vec = vec_incref(vec_alloc());
-  
+
   int items = depth();
 
   for (int i = 0; i < items; i++)
@@ -231,8 +238,11 @@ op_limit ()
   int old_depth = routine()->marks[routine()->mark_count-1];
   int req_depth = old_depth + count;
   routine()->mark_count--;
-  while (req_depth < stack()->count) op_drop();
-  while (req_depth > stack()->count) push(NULL);
+  if (count >= 0)
+  {
+    while (req_depth < stack()->count) op_drop();
+    while (req_depth > stack()->count) push(NULL);
+  }
 }
 
 void
@@ -431,9 +441,9 @@ op_values ()
 void
 op_assign ()
 {
-  void *val = pop();
   void *key = pop();
-  push(val);
+  int index = code[routine()->ip-1].offset;
+  void *val = index < depth() ? item(index)[0]: NULL;
   map_set(scope_writing(), key)[0] = copy(val);
   discard(key);
 }
@@ -441,7 +451,9 @@ op_assign ()
 void
 op_assign_lit ()
 {
-  map_set(scope_writing(), code[routine()->ip-1].ptr)[0] = copy(top());
+  int index = code[routine()->ip-1].offset;
+  void *val = index < depth() ? item(index)[0]: NULL;
+  map_set(scope_writing(), code[routine()->ip-1].ptr)[0] = copy(val);
 }
 
 void

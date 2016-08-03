@@ -100,6 +100,7 @@ func_t funcs[] = {
   [OP_RESUME] = { .name = "resume", .func = op_resume },
   [OP_YIELD] = { .name = "yield", .func = op_yield },
   [OP_CALL] = { .name = "call", .func = op_call },
+  [OP_CALL_LIT] = { .name = "call_lit", .func = op_call_lit },
   [OP_RETURN] = { .name = "return", .func = op_return },
   [OP_STRING] = { .name = "string", .func = op_string },
   [OP_ARRAY] = { .name = "array", .func = op_array },
@@ -558,6 +559,18 @@ compile (int op)
     return a;
   }
 
+  if (a && op == OP_CALL && a->op == OP_FIND_LIT)
+  {
+    a->op = OP_CALL_LIT;
+    return a;
+  }
+
+  if (a && op == OP_CALL && a->op == OP_LIT)
+  {
+    a->op = OP_CALL_LIT;
+    return a;
+  }
+
   // math
 
   if (a && op == OP_ADD && a->op == OP_LIT)
@@ -619,7 +632,7 @@ run ()
 //    char *s = to_char(stack()); errorf("%s", s); discard(s);
 //    for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "  ");
 //    for (int i = 0; i < routine()->mark_count; i++) fprintf(stderr, "%d ", routine()->marks[i]);
-//    fprintf(stderr, "\n\n");  
+//    fprintf(stderr, "\n\n");
   }
 }
 

@@ -27,6 +27,7 @@ void op_coroutine ();
 void op_resume ();
 void op_yield ();
 void op_call ();
+void op_call_lit ();
 void op_return ();
 void op_lit ();
 void op_scope ();
@@ -93,6 +94,7 @@ enum {
   OP_RESUME,
   OP_YIELD,
   OP_CALL,
+  OP_CALL_LIT,
   OP_CALL_OTHER,
   OP_RETURN,
   OP_STRING,
