@@ -22,20 +22,28 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 enum {
-  EXPR_VAR=1,
-  EXPR_LIT
+  EXPR_MULTI=1,
+  EXPR_VARIABLE,
+  EXPR_LITERAL,
+  EXPR_OPCODE
 };
 
-typedef struct {
+typedef struct _expr_t {
   int type;
+  int opcode;
   int call;
-  int args;
   void *item;
+  struct _expr_t *args;
   char *source;
+  int keyc;
+  struct _expr_t *keys[32];
+  int valc;
+  struct _expr_t *vals[32];
+  int results;
 } expr_t;
 
 int isname (int);
 int islf (int);
 int skip (char*);
-int parse (char*, int);
+int parse (char*, int, int);
 void source (char*);

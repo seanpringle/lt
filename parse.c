@@ -79,7 +79,7 @@ skip_gap (char *source)
 expr_t*
 expr_alloc ()
 {
-  expr_t *expr = heap_alloc(sizeof(expr_t));
+  expr_t *expr = malloc(sizeof(expr_t));
   memset(expr, 0, sizeof(expr_t));
   return expr;
 }
@@ -87,11 +87,21 @@ expr_alloc ()
 void
 expr_free (expr_t *expr)
 {
-  heap_free(expr);
+  free(expr);
 }
 
+typedef struct {
+  char *name;
+  int opcode;
+} keyword_t;
+
+keyword_t keywords[] = {
+  { .name = "global", .opcode = OP_GLOBAL },
+  { .name = "local", .opcode = OP_LOCAL },
+};
+
 int
-expression (char *source)
+parse_item (char *source)
 {
   int length = 0;
   int offset = skip_gap(source);
@@ -101,15 +111,33 @@ expression (char *source)
 
   if (isalpha(source[offset]))
   {
-    expr->type = EXPR_VAR;
+    expr->type = EXPR_VARIABLE;
     length = str_skip(&source[offset], isname);
-    expr->item = substr(&source[offset], 0, length);
+
+    int have_keyword = 0;
+
+    for (int i = 0; i < sizeof(keywords) / sizeof(keyword_t) && !have_keyword; i++)
+    {
+      keyword_t *keyword = &keywords[i];
+      int name_len = strlen(keyword->name);
+
+      if (length == name_len && !strncmp(&source[offset], keyword->name, name_len))
+      {
+        expr->type = EXPR_OPCODE;
+        expr->opcode = OP_GLOBAL;
+        have_keyword = 1;
+      }
+    }
+
+    if (!have_keyword)
+      expr->item = substr(&source[offset], 0, length);
+
     offset += length;
   }
   else
   if (source[offset] == '"')
   {
-    expr->type = EXPR_LIT;
+    expr->type = EXPR_LITERAL;
     char *end = NULL;
     expr->item = str_unquote(&source[offset], &end);
     offset += end - &source[offset];
@@ -117,7 +145,7 @@ expression (char *source)
   else
   if (isdigit(source[offset]))
   {
-    expr->type = EXPR_LIT;
+    expr->type = EXPR_LITERAL;
     char *end = NULL;
     expr->item = to_int(strtoll(&source[offset], &end, 0));
     offset += end - &source[offset];
@@ -128,65 +156,135 @@ expression (char *source)
       errorf("what: %s", &source[offset]);
   }
 
-  while (source[offset])
+  offset += skip_gap(&source[offset]);
+
+  if (source[offset] == '(')
   {
+    offset++;
+    expr->call = 1;
+
+    offset += parse(&source[offset], -1, 1);
+    expr->args = pop();
+
     offset += skip_gap(&source[offset]);
 
-    if (source[offset] == '(')
-    {
-      expr->call = 1;
+    ensure(source[offset] == ')')
+      errorf("expected closing paren: %s", source);
 
-      int count = depth();
-      offset += parse(&source[offset], -1);
-      expr->args = depth() - count;
-    }
-
-    break;
+    offset++;
   }
 
   push(expr);
   return offset;
 }
 
+typedef struct {
+  char *name;
+  int precedence;
+  int opcode;
+} operator_t;
+
+operator_t operators[] = {
+  { .name = "+", .precedence = 1, .opcode = OP_ADD },
+  { .name = "-", .precedence = 1, .opcode = OP_SUB },
+  { .name = "*", .precedence = 2, .opcode = OP_MUL },
+  { .name = "/", .precedence = 2, .opcode = OP_DIV },
+};
+
 int
-parse (char *source, int results)
+parse (char *source, int results, int level)
 {
+  int length = 0;
   int offset = skip_gap(source);
 
-  code_t *marker = compile(OP_MARK);
-
-  vec_t *keys = vec_alloc();
-  vec_t *vals = vec_alloc();
-  vec_t *exprs = keys;
-
-  int parens = source[offset] == '(';
-  if (parens) offset++;
+  expr_t *expr = expr_alloc();
+  expr->type = EXPR_MULTI;
+  expr->results = results;
 
   while (source[offset])
   {
-    int length;
-
-    if ((length = skip_gap(&source[offset])) > 0)
+    if ((length = skip_gap(&source[offset]))> 0)
     {
       offset += length;
       continue;
     }
 
-    if (parens && source[offset] == ')')
-    {
-      offset++;
-      break;
-    }
+    operator_t *operations[32];
+    expr_t *arguments[32];
+    int operation = 0;
+    int argument = 0;
 
-    offset += expression(&source[offset]);
-    vec_push(exprs)[0] = pop();
+    char *start = &source[offset];
+
+    while (source[offset])
+    {
+      if ((length = skip_gap(&source[offset])) > 0)
+      {
+        offset += length;
+        continue;
+      }
+
+      offset += parse_item(&source[offset]);
+      arguments[argument++] = pop();
+
+      int have_operator = 0;
+      for (int i = 0; i < sizeof(operators) / sizeof(operator_t); i++)
+      {
+        operator_t *compare = &operators[i];
+
+        if (!strncmp(compare->name, &source[offset], strlen(compare->name)))
+        {
+          have_operator = 1;
+          offset += strlen(compare->name);
+
+          while (operation > 0 && operations[operation-1]->precedence >= compare->precedence)
+          {
+            operator_t *consume = operations[--operation];
+            expr_t *pair = expr_alloc();
+            pair->type   = EXPR_OPCODE;
+            pair->opcode = consume->opcode;
+            pair->vals[pair->valc++] = arguments[--argument];
+            pair->vals[pair->valc++] = arguments[--argument];
+            arguments[argument++] = pair;
+          }
+
+          operations[operation++] = compare;
+        }
+      }
+
+      if (!have_operator)
+      {
+        while (operation > 0)
+        {
+          operator_t *consume = operations[--operation];
+          expr_t *pair = expr_alloc();
+          pair->type   = EXPR_OPCODE;
+          pair->opcode = consume->opcode;
+          pair->vals[pair->valc++] = arguments[--argument];
+          pair->vals[pair->valc++] = arguments[--argument];
+          arguments[argument++] = pair;
+        }
+
+        ensure(argument == 1)
+          errorf("unbalanced infix expression: %s", start);
+
+        expr->vals[expr->valc++] = arguments[0];
+        break;
+      }
+    }
 
     offset += skip_gap(&source[offset]);
 
-    if (exprs == keys && source[offset] == '=')
+    if (source[offset] == '=')
     {
+      ensure (level == 0)
+        errorf("unexpected assignment: %s", source);
+
       offset++;
-      exprs = vals;
+      for (int i = 0; i < expr->valc; i++)
+        expr->keys[i] = expr->vals[i];
+      expr->keyc = expr->valc;
+      expr->valc = 0;
       continue;
     }
 
@@ -196,64 +294,61 @@ parse (char *source, int results)
       continue;
     }
 
-    if (!parens)
-      break;
+    break;
   }
 
-  if (!vals->count)
+  push(expr);
+  return offset;
+}
+
+void
+process (expr_t *expr, int assign, int index)
+{
+  if (expr->args)
+    process(expr->args, 0, 0);
+
+  if (expr->type == EXPR_MULTI)
   {
-    exprs = keys;
-    keys = vals;
-    vals = exprs;
+    compile(OP_MARK);
+
+    for (int i = 0; i < expr->valc; i++)
+      process(expr->vals[i], 0, 0);
+
+    for (int i = 0; i < expr->keyc; i++)
+      process(expr->keys[i], 1, i);
+
+    compile(OP_LIMIT)->offset = expr->results;
   }
-
-  for (int i = 0; i < vals->count; i++)
+  else
+  if (expr->type == EXPR_VARIABLE)
   {
-    expr_t *val = vec_get(vals, i)[0];
-
-    if (val->type == EXPR_LIT)
-    {
-      compile(OP_LIT)->ptr = val->item;
-    }
-    else
-    if (val->type == EXPR_VAR)
-    {
-      compile(OP_FIND_LIT)->ptr = val->item;
-    }
-
-    if (val->call) compile(OP_CALL);
-    expr_free(val);
+    code_t *code = compile(assign ? OP_ASSIGN_LIT: OP_FIND_LIT);
+    code->ptr = expr->item;
+    code->offset = index;
   }
-
-  for (int i = 0; i < keys->count; i++)
+  else
+  if (expr->type == EXPR_LITERAL)
   {
-    expr_t *key = vec_get(keys, i)[0];
-
-    ensure(key->type == EXPR_VAR)
-      errorf("attempt to assign non-variable: %s", key->source);
-
-    code_t *code = compile(OP_ASSIGN_LIT);
-    code->ptr    = key->item;
-    code->offset = i;
+    compile(OP_LIT)->ptr = expr->item;
   }
-
-  vals->count = 0;
-  keys->count = 0;
-
-  discard(keys);
-  discard(vals);
-
-  if (results == -1 && hindsight(-1)->op == OP_FIND_LIT && hindsight(-2) == marker)
+  else
+  if (expr->type == EXPR_OPCODE)
   {
-    memmove(marker, hindsight(-1), sizeof(code_t));
-    code_count--;
+    for (int i = 0; i < expr->valc; i++)
+      process(expr->vals[i], 0, 0);
+
+    compile(expr->opcode);
   }
   else
   {
-    compile(OP_LIMIT)->offset = results;
+    ensure(0)
+      errorf("unexpected expression type: %d", expr->type);
   }
 
-  return offset + skip_gap(&source[offset]);
+  if (expr->call)
+    compile(OP_CALL);
+
+  expr_free(expr);
 }
 
 void
@@ -261,6 +356,13 @@ source (char *s)
 {
   int offset = 0;
 
+  int mark = depth();
+
   while (s[offset])
-    offset += parse(&s[offset], 0);
+    offset += parse(&s[offset], 0, 0);
+
+  errorf("depth %d", depth());
+
+  for (int i = mark; i < depth(); i++)
+    process(item(i)[0], 0, 0);
 }
