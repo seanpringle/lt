@@ -25,7 +25,9 @@ enum {
   EXPR_MULTI=1,
   EXPR_VARIABLE,
   EXPR_LITERAL,
-  EXPR_OPCODE
+  EXPR_OPCODE,
+  EXPR_IF,
+  EXPR_WHILE
 };
 
 typedef struct _expr_t {

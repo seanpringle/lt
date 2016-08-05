@@ -76,6 +76,13 @@ skip_gap (char *source)
   return offset;
 }
 
+int
+peek (char *source, char *name)
+{
+  int len = strlen(name);
+  return !strncmp(source, name, len) && !isname(source[len]);
+}
+
 expr_t*
 expr_alloc ()
 {
@@ -98,7 +105,40 @@ typedef struct {
 keyword_t keywords[] = {
   { .name = "global", .opcode = OP_GLOBAL },
   { .name = "local", .opcode = OP_LOCAL },
+  { .name = "true", .opcode = OP_TRUE },
+  { .name = "false", .opcode = OP_FALSE },
 };
+
+int
+parse_block (char *source, expr_t *expr)
+{
+  int length = 0;
+  int found_end = 0;
+  int offset = skip_gap(source);
+
+  while (source[offset])
+  {
+    if ((length = skip_gap(&source[offset])) > 0)
+    {
+      offset += length;
+      continue;
+    }
+    if (peek(&source[offset], "end"))
+    {
+      offset += 3;
+      found_end = 1;
+      break;
+    }
+
+    offset += parse(&source[offset], 0, 0);
+    expr->vals[expr->valc++] = pop();
+  }
+
+  ensure (found_end)
+    errorf("expected keyword 'end': %s", source);
+
+  return offset;
+}
 
 int
 parse_item (char *source)
@@ -119,20 +159,57 @@ parse_item (char *source)
     for (int i = 0; i < sizeof(keywords) / sizeof(keyword_t) && !have_keyword; i++)
     {
       keyword_t *keyword = &keywords[i];
-      int name_len = strlen(keyword->name);
 
-      if (length == name_len && !strncmp(&source[offset], keyword->name, name_len))
+      if (peek(&source[offset], keyword->name))
       {
         expr->type = EXPR_OPCODE;
-        expr->opcode = OP_GLOBAL;
+        expr->opcode = keyword->opcode;
         have_keyword = 1;
+        offset += length;
       }
     }
 
     if (!have_keyword)
-      expr->item = substr(&source[offset], 0, length);
+    {
+      if (peek(&source[offset], "if"))
+      {
+        offset += 2;
+        expr->type = EXPR_IF;
 
-    offset += length;
+        offset += parse(&source[offset], 1, 0);
+        expr->args = pop();
+
+        offset += skip_gap(&source[offset]);
+
+        ensure (!strncmp(&source[offset], "then", 4))
+          errorf("expected keyword 'then': %s", &source[offset]);
+
+        offset += 4;
+        offset += parse_block(&source[offset], expr);
+      }
+      else
+      if (peek(&source[offset], "while"))
+      {
+        offset += 5;
+        expr->type = EXPR_WHILE;
+
+        offset += parse(&source[offset], 1, 0);
+        expr->args = pop();
+
+        offset += skip_gap(&source[offset]);
+
+        ensure (!strncmp(&source[offset], "do", 2))
+          errorf("expected keyword 'do': %s", &source[offset]);
+
+        offset += 2;
+        offset += parse_block(&source[offset], expr);
+      }
+      else
+      {
+        expr->item = substr(&source[offset], 0, length);
+        offset += length;
+      }
+    }
   }
   else
   if (source[offset] == '"')
@@ -185,10 +262,16 @@ typedef struct {
 } operator_t;
 
 operator_t operators[] = {
-  { .name = "+", .precedence = 1, .opcode = OP_ADD },
-  { .name = "-", .precedence = 1, .opcode = OP_SUB },
-  { .name = "*", .precedence = 2, .opcode = OP_MUL },
-  { .name = "/", .precedence = 2, .opcode = OP_DIV },
+  { .name = ">",  .precedence = 1, .opcode = OP_GT },
+  { .name = ">=", .precedence = 1, .opcode = OP_GTE },
+  { .name = "<",  .precedence = 1, .opcode = OP_LT },
+  { .name = "<=", .precedence = 1, .opcode = OP_LTE },
+  { .name = "..", .precedence = 2, .opcode = OP_CONCAT },
+  { .name = "+",  .precedence = 2, .opcode = OP_ADD },
+  { .name = "-",  .precedence = 2, .opcode = OP_SUB },
+  { .name = "*",  .precedence = 3, .opcode = OP_MUL },
+  { .name = "/",  .precedence = 3, .opcode = OP_DIV },
+  { .name = "%",  .precedence = 3, .opcode = OP_MOD },
 };
 
 int
@@ -243,8 +326,9 @@ parse (char *source, int results, int level)
             expr_t *pair = expr_alloc();
             pair->type   = EXPR_OPCODE;
             pair->opcode = consume->opcode;
-            pair->vals[pair->valc++] = arguments[--argument];
-            pair->vals[pair->valc++] = arguments[--argument];
+            pair->vals[pair->valc++] = arguments[argument-2];
+            pair->vals[pair->valc++] = arguments[argument-1];
+            argument -= 2;
             arguments[argument++] = pair;
           }
 
@@ -260,8 +344,9 @@ parse (char *source, int results, int level)
           expr_t *pair = expr_alloc();
           pair->type   = EXPR_OPCODE;
           pair->opcode = consume->opcode;
-          pair->vals[pair->valc++] = arguments[--argument];
-          pair->vals[pair->valc++] = arguments[--argument];
+          pair->vals[pair->valc++] = arguments[argument-2];
+          pair->vals[pair->valc++] = arguments[argument-1];
+          argument -= 2;
           arguments[argument++] = pair;
         }
 
@@ -277,9 +362,6 @@ parse (char *source, int results, int level)
 
     if (source[offset] == '=')
     {
-      ensure (level == 0)
-        errorf("unexpected assignment: %s", source);
-
       offset++;
       for (int i = 0; i < expr->valc; i++)
         expr->keys[i] = expr->vals[i];
@@ -304,12 +386,14 @@ parse (char *source, int results, int level)
 void
 process (expr_t *expr, int assign, int index)
 {
+  int begin = code_count;
+
   if (expr->args)
     process(expr->args, 0, 0);
 
   if (expr->type == EXPR_MULTI)
   {
-    compile(OP_MARK);
+    code_t *mark = compile(OP_MARK);
 
     for (int i = 0; i < expr->valc; i++)
       process(expr->vals[i], 0, 0);
@@ -317,7 +401,15 @@ process (expr_t *expr, int assign, int index)
     for (int i = 0; i < expr->keyc; i++)
       process(expr->keys[i], 1, i);
 
-    compile(OP_LIMIT)->offset = expr->results;
+    if (expr->results != 0 && hindsight(-2) == mark)
+    {
+      memmove(mark, hindsight(-1), sizeof(code_t));
+      code_count--;
+    }
+    else
+    {
+      compile(OP_LIMIT)->offset = expr->results;
+    }
   }
   else
   if (expr->type == EXPR_VARIABLE)
@@ -340,6 +432,29 @@ process (expr_t *expr, int assign, int index)
     compile(expr->opcode);
   }
   else
+  if (expr->type == EXPR_IF)
+  {
+    compile(OP_TEST);
+    code_t *jump = compile(OP_JFALSE);
+
+    for (int i = 0; i < expr->valc; i++)
+      process(expr->vals[i], 0, 0);
+
+    jump->offset = code_count;
+  }
+  else
+  if (expr->type == EXPR_WHILE)
+  {
+    compile(OP_TEST);
+    code_t *jump = compile(OP_JFALSE);
+
+    for (int i = 0; i < expr->valc; i++)
+      process(expr->vals[i], 0, 0);
+
+    compile(OP_JMP)->offset = begin;
+    jump->offset = code_count;
+  }
+  else
   {
     ensure(0)
       errorf("unexpected expression type: %d", expr->type);
@@ -360,8 +475,6 @@ source (char *s)
 
   while (s[offset])
     offset += parse(&s[offset], 0, 0);
-
-  errorf("depth %d", depth());
 
   for (int i = mark; i < depth(); i++)
     process(item(i)[0], 0, 0);
