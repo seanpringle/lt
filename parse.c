@@ -116,6 +116,9 @@ parse_block (char *source, expr_t *expr)
   int found_end = 0;
   int offset = skip_gap(source);
 
+  if (peek(&source[offset], "do"))
+    offset += 2;
+
   while (source[offset])
   {
     if ((length = skip_gap(&source[offset])) > 0)
@@ -136,6 +139,74 @@ parse_block (char *source, expr_t *expr)
 
   ensure (found_end)
     errorf("expected keyword 'end': %s", source);
+
+  return offset;
+}
+
+int
+parse_branch (char *source, expr_t *expr)
+{
+  int length = 0;
+  int found_else = 0;
+  int found_end = 0;
+  int offset = skip_gap(source);
+
+  if (peek(&source[offset], "then"))
+    offset += 4;
+
+  while (source[offset])
+  {
+    if ((length = skip_gap(&source[offset])) > 0)
+    {
+      offset += length;
+      continue;
+    }
+    if (peek(&source[offset], "else"))
+    {
+      offset += 4;
+      found_else = 1;
+      break;
+    }
+    if (peek(&source[offset], "end"))
+    {
+      offset += 3;
+      found_end = 1;
+      break;
+    }
+
+    offset += parse(&source[offset], 0, 0);
+    expr->vals[expr->valc++] = pop();
+  }
+
+  if (found_else)
+  {
+    while (source[offset])
+    {
+      if ((length = skip_gap(&source[offset])) > 0)
+      {
+        offset += length;
+        continue;
+      }
+      if (peek(&source[offset], "end"))
+      {
+        offset += 3;
+        found_end = 1;
+        break;
+      }
+
+      offset += parse(&source[offset], 0, 0);
+      expr->keys[expr->keyc++] = pop();
+    }
+  }
+
+  ensure (found_end)
+    errorf("expected keyword 'end': %s", source);
+
+  if (expr->valc)
+    expr->vals[expr->valc-1]->results = 1;
+
+  if (expr->keyc)
+    expr->keys[expr->keyc-1]->results = 1;
 
   return offset;
 }
@@ -179,13 +250,7 @@ parse_item (char *source)
         offset += parse(&source[offset], 1, 0);
         expr->args = pop();
 
-        offset += skip_gap(&source[offset]);
-
-        ensure (!strncmp(&source[offset], "then", 4))
-          errorf("expected keyword 'then': %s", &source[offset]);
-
-        offset += 4;
-        offset += parse_block(&source[offset], expr);
+        offset += parse_branch(&source[offset], expr);
       }
       else
       if (peek(&source[offset], "while"))
@@ -196,13 +261,76 @@ parse_item (char *source)
         offset += parse(&source[offset], 1, 0);
         expr->args = pop();
 
+        offset += parse_block(&source[offset], expr);
+      }
+      else
+      if (peek(&source[offset], "function"))
+      {
+        offset += 8;
+        expr->type = EXPR_FUNCTION;
+
         offset += skip_gap(&source[offset]);
 
-        ensure (!strncmp(&source[offset], "do", 2))
-          errorf("expected keyword 'do': %s", &source[offset]);
+        if (isalpha(source[offset]))
+        {
+          length = str_skip(&source[offset], isname);
+          expr->item = substr(&source[offset], 0, length);
+          offset += length;
+        }
 
-        offset += 2;
+        offset += skip_gap(&source[offset]);
+
+        if (source[offset] == '(')
+        {
+          offset++;
+
+          while (source[offset])
+          {
+            if ((length = skip_gap(&source[offset])) > 0)
+            {
+              offset += length;
+              continue;
+            }
+            if (source[offset] == ',')
+            {
+              offset++;
+              continue;
+            }
+            if (source[offset] == ')')
+            {
+              offset++;
+              break;
+            }
+
+            ensure(isalpha(source[offset]))
+              errorf("expected parameter: %s", &source[offset]);
+
+            length = str_skip(&source[offset], isname);
+
+            expr_t *param = expr_alloc();
+            param->type = EXPR_VARIABLE;
+            param->item = substr(&source[offset], 0, length);
+            expr->keys[expr->keyc++] = param;
+
+            offset += length;
+          }
+        }
         offset += parse_block(&source[offset], expr);
+      }
+      else
+      if (peek(&source[offset], "return"))
+      {
+        offset += 6;
+        expr->type = EXPR_OPCODE;
+        expr->opcode = OP_RETURN;
+
+        offset += skip_gap(&source[offset]);
+
+        if (!peek(&source[offset], "end"))
+        {
+          offset += parse(&source[offset], -1, 1);
+          expr->args = pop();
+        }
       }
       else
       {
@@ -240,8 +368,13 @@ parse_item (char *source)
     offset++;
     expr->call = 1;
 
-    offset += parse(&source[offset], -1, 1);
-    expr->args = pop();
+    offset += skip_gap(&source[offset]);
+
+    if (source[offset] != ')')
+    {
+      offset += parse(&source[offset], -1, 1);
+      expr->args = pop();
+    }
 
     offset += skip_gap(&source[offset]);
 
@@ -440,7 +573,20 @@ process (expr_t *expr, int assign, int index)
     for (int i = 0; i < expr->valc; i++)
       process(expr->vals[i], 0, 0);
 
-    jump->offset = code_count;
+    if (expr->keyc)
+    {
+      code_t *jump2 = compile(OP_JMP);
+      jump->offset = code_count;
+
+      for (int i = 0; i < expr->keyc; i++)
+        process(expr->keys[i], 0, 0);
+
+      jump2->offset = code_count;
+    }
+    else
+    {
+      jump->offset = code_count;
+    }
   }
   else
   if (expr->type == EXPR_WHILE)
@@ -453,6 +599,33 @@ process (expr_t *expr, int assign, int index)
 
     compile(OP_JMP)->offset = begin;
     jump->offset = code_count;
+  }
+  else
+  if (expr->type == EXPR_FUNCTION)
+  {
+    compile(OP_MARK);
+    code_t *entry = compile(OP_LIT);
+
+    if (expr->item)
+    {
+      code_t *name = compile(OP_ASSIGN_LIT);
+      name->ptr = expr->item;
+      name->offset = 0;
+    }
+
+    code_t *jump = compile(OP_JMP);
+    entry->ptr = to_int(code_count);
+
+    for (int i = 0; i < expr->keyc; i++)
+      process(expr->keys[i], 1, i);
+
+    for (int i = 0; i < expr->valc; i++)
+      process(expr->vals[i], 0, 0);
+
+    compile(OP_RETURN);
+    jump->offset = code_count;
+
+    compile(OP_LIMIT)->offset = 1;
   }
   else
   {

@@ -27,7 +27,8 @@ enum {
   EXPR_LITERAL,
   EXPR_OPCODE,
   EXPR_IF,
-  EXPR_WHILE
+  EXPR_WHILE,
+  EXPR_FUNCTION
 };
 
 typedef struct _expr_t {
