@@ -38,6 +38,27 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "lt.h"
 #include "parse.h"
 
+enum {
+  EXPR_MULTI=1,
+  EXPR_VARIABLE,
+  EXPR_LITERAL,
+  EXPR_OPCODE,
+  EXPR_IF,
+  EXPR_WHILE,
+  EXPR_FUNCTION,
+  EXPR_RETURN,
+  EXPR_BUILTIN,
+  EXPR_VEC,
+  EXPR_MAP
+};
+
+#define RESULTS_DISCARD 0
+#define RESULTS_FIRST 1
+#define RESULTS_ALL -1
+
+#define PARSE_GREEDY 1
+#define PARSE_KEYVAL 2
+
 int
 isname (int c)
 {
@@ -107,6 +128,7 @@ keyword_t keywords[] = {
   { .name = "local", .opcode = OP_LOCAL },
   { .name = "true", .opcode = OP_TRUE },
   { .name = "false", .opcode = OP_FALSE },
+  { .name = "nil", .opcode = OP_NIL },
 };
 
 int
@@ -133,7 +155,7 @@ parse_block (char *source, expr_t *expr)
       break;
     }
 
-    offset += parse(&source[offset], 0, 0);
+    offset += parse(&source[offset], RESULTS_DISCARD, PARSE_GREEDY);
     expr->vals[expr->valc++] = pop();
   }
 
@@ -174,7 +196,7 @@ parse_branch (char *source, expr_t *expr)
       break;
     }
 
-    offset += parse(&source[offset], 0, 0);
+    offset += parse(&source[offset], RESULTS_DISCARD, PARSE_GREEDY);
     expr->vals[expr->valc++] = pop();
   }
 
@@ -194,7 +216,7 @@ parse_branch (char *source, expr_t *expr)
         break;
       }
 
-      offset += parse(&source[offset], 0, 0);
+      offset += parse(&source[offset], RESULTS_DISCARD, PARSE_GREEDY);
       expr->keys[expr->keyc++] = pop();
     }
   }
@@ -207,6 +229,33 @@ parse_branch (char *source, expr_t *expr)
 
   if (expr->keyc)
     expr->keys[expr->keyc-1]->results = 1;
+
+  return offset;
+}
+
+int
+parse_arglist (char *source)
+{
+  int mark = depth();
+  int offset = skip_gap(source);
+
+  if (source[offset] == '(')
+  {
+    offset++;
+    offset += parse(&source[offset], RESULTS_ALL, PARSE_GREEDY);
+    offset += skip_gap(&source[offset]);
+
+    ensure (source[offset] == ')')
+      errorf("expected closing paren: %s", source);
+    offset++;
+  }
+  else
+  {
+    offset += parse(&source[offset], RESULTS_FIRST, PARSE_GREEDY);
+  }
+
+  if (depth() == mark)
+    push(NULL);
 
   return offset;
 }
@@ -247,7 +296,7 @@ parse_item (char *source)
         offset += 2;
         expr->type = EXPR_IF;
 
-        offset += parse(&source[offset], 1, 0);
+        offset += parse(&source[offset], RESULTS_FIRST, PARSE_GREEDY);
         expr->args = pop();
 
         offset += parse_branch(&source[offset], expr);
@@ -258,7 +307,7 @@ parse_item (char *source)
         offset += 5;
         expr->type = EXPR_WHILE;
 
-        offset += parse(&source[offset], 1, 0);
+        offset += parse(&source[offset], RESULTS_FIRST, PARSE_GREEDY);
         expr->args = pop();
 
         offset += parse_block(&source[offset], expr);
@@ -321,16 +370,59 @@ parse_item (char *source)
       if (peek(&source[offset], "return"))
       {
         offset += 6;
-        expr->type = EXPR_OPCODE;
-        expr->opcode = OP_RETURN;
+        expr->type = EXPR_RETURN;
 
         offset += skip_gap(&source[offset]);
 
         if (!peek(&source[offset], "end"))
         {
-          offset += parse(&source[offset], -1, 1);
-          expr->args = pop();
+          offset += parse(&source[offset], RESULTS_ALL, PARSE_GREEDY);
+          expr->vals[expr->valc++] = pop();
         }
+      }
+      else
+      if (peek(&source[offset], "break"))
+      {
+        offset += 5;
+        expr->type = EXPR_OPCODE;
+        expr->opcode = OP_BREAK;
+      }
+      else
+      if (peek(&source[offset], "continue"))
+      {
+        offset += 8;
+        expr->type = EXPR_OPCODE;
+        expr->opcode = OP_CONTINUE;
+      }
+      else
+      if (peek(&source[offset], "coroutine"))
+      {
+        offset += 9;
+        expr->type = EXPR_BUILTIN;
+        expr->opcode = OP_COROUTINE;
+        offset += parse_arglist(&source[offset]);
+        expr->args = pop();
+        expr->results = 1;
+      }
+      else
+      if (peek(&source[offset], "yield"))
+      {
+        offset += 5;
+        expr->type = EXPR_BUILTIN;
+        expr->opcode = OP_YIELD;
+        offset += parse_arglist(&source[offset]);
+        expr->args = pop();
+        expr->results = -1;
+      }
+      else
+      if (peek(&source[offset], "resume"))
+      {
+        offset += 6;
+        expr->type = EXPR_BUILTIN;
+        expr->opcode = OP_RESUME;
+        offset += parse_arglist(&source[offset]);
+        expr->args = pop();
+        expr->results = -1;
       }
       else
       {
@@ -356,6 +448,55 @@ parse_item (char *source)
     offset += end - &source[offset];
   }
   else
+  if (source[offset] == '#')
+  {
+    offset++;
+    expr->type = EXPR_OPCODE;
+    expr->opcode = OP_COUNT;
+    offset += parse(&source[offset], RESULTS_DISCARD, PARSE_GREEDY);
+    expr->vals[expr->valc++] = pop();
+  }
+  else
+  if (source[offset] == '[')
+  {
+    offset++;
+    expr->type = EXPR_VEC;
+    offset += parse(&source[offset], RESULTS_ALL, PARSE_GREEDY);
+    expr->args = pop();
+    offset += skip_gap(&source[offset]);
+
+    ensure (source[offset] == ']')
+      errorf("expected closing bracket: %s", source);
+    offset++;
+  }
+  else
+  if (source[offset] == '{')
+  {
+    offset++;
+    expr->type = EXPR_MAP;
+
+    while (source[offset])
+    {
+      if ((length = skip_gap(&source[offset])) > 0)
+      {
+        offset += length;
+        continue;
+      }
+      if (source[offset] == '}')
+      {
+        offset++;
+        break;
+      }
+      if (source[offset] == ',')
+      {
+        offset++;
+        continue;
+      }
+      offset += parse(&source[offset], RESULTS_DISCARD, PARSE_KEYVAL);
+      expr->vals[expr->valc++] = pop();
+    }
+  }
+  else
   {
     ensure(0)
       errorf("what: %s", &source[offset]);
@@ -365,23 +506,9 @@ parse_item (char *source)
 
   if (source[offset] == '(')
   {
-    offset++;
     expr->call = 1;
-
-    offset += skip_gap(&source[offset]);
-
-    if (source[offset] != ')')
-    {
-      offset += parse(&source[offset], -1, 1);
-      expr->args = pop();
-    }
-
-    offset += skip_gap(&source[offset]);
-
-    ensure(source[offset] == ')')
-      errorf("expected closing paren: %s", source);
-
-    offset++;
+    offset += parse_arglist(&source[offset]);
+    expr->args = pop();
   }
 
   push(expr);
@@ -395,6 +522,8 @@ typedef struct {
 } operator_t;
 
 operator_t operators[] = {
+  { .name = "==", .precedence = 1, .opcode = OP_EQ },
+  { .name = "!=", .precedence = 1, .opcode = OP_NE },
   { .name = ">",  .precedence = 1, .opcode = OP_GT },
   { .name = ">=", .precedence = 1, .opcode = OP_GTE },
   { .name = "<",  .precedence = 1, .opcode = OP_LT },
@@ -408,7 +537,7 @@ operator_t operators[] = {
 };
 
 int
-parse (char *source, int results, int level)
+parse (char *source, int results, int mode)
 {
   int length = 0;
   int offset = skip_gap(source);
@@ -495,6 +624,12 @@ parse (char *source, int results, int level)
 
     if (source[offset] == '=')
     {
+      ensure (expr->valc > 0)
+        errorf("missing assignment name: %s", source);
+
+      ensure (expr->keyc == 0)
+        errorf("invalid nested assignment: %s", source);
+
       offset++;
       for (int i = 0; i < expr->valc; i++)
         expr->keys[i] = expr->vals[i];
@@ -503,7 +638,7 @@ parse (char *source, int results, int level)
       continue;
     }
 
-    if (source[offset] == ',')
+    if (source[offset] == ',' && mode == PARSE_GREEDY)
     {
       offset++;
       continue;
@@ -512,6 +647,9 @@ parse (char *source, int results, int level)
     break;
   }
 
+  ensure(expr->valc > 0)
+    errorf("missing assignment value: %s", source);
+
   push(expr);
   return offset;
 }
@@ -519,14 +657,15 @@ parse (char *source, int results, int level)
 void
 process (expr_t *expr, int assign, int index)
 {
-  int begin = code_count;
-
-  if (expr->args)
-    process(expr->args, 0, 0);
-
   if (expr->type == EXPR_MULTI)
   {
-    code_t *mark = compile(OP_MARK);
+    if (expr->args)
+      process(expr->args, 0, 0);
+
+    code_t *mark = NULL;
+    
+    if (expr->results != -1)
+      mark = compile(OP_MARK);
 
     for (int i = 0; i < expr->valc; i++)
       process(expr->vals[i], 0, 0);
@@ -534,19 +673,25 @@ process (expr_t *expr, int assign, int index)
     for (int i = 0; i < expr->keyc; i++)
       process(expr->keys[i], 1, i);
 
-    if (expr->results != 0 && hindsight(-2) == mark)
+    if (expr->results != -1)
     {
-      memmove(mark, hindsight(-1), sizeof(code_t));
-      code_count--;
-    }
-    else
-    {
-      compile(OP_LIMIT)->offset = expr->results;
+      if (expr->results == 1 && hindsight(-2) == mark)
+      {
+        memmove(mark, hindsight(-1), sizeof(code_t));
+        code_count--;
+      }
+      else
+      {
+        compile(OP_LIMIT)->offset = expr->results;
+      }
     }
   }
   else
   if (expr->type == EXPR_VARIABLE)
   {
+    if (expr->args)
+      process(expr->args, 0, 0);
+
     code_t *code = compile(assign ? OP_ASSIGN_LIT: OP_FIND_LIT);
     code->ptr = expr->item;
     code->offset = index;
@@ -554,19 +699,39 @@ process (expr_t *expr, int assign, int index)
   else
   if (expr->type == EXPR_LITERAL)
   {
+    if (expr->args)
+      process(expr->args, 0, 0);
+
     compile(OP_LIT)->ptr = expr->item;
   }
   else
   if (expr->type == EXPR_OPCODE)
   {
+    if (expr->args)
+      process(expr->args, 0, 0);
+
     for (int i = 0; i < expr->valc; i++)
       process(expr->vals[i], 0, 0);
 
     compile(expr->opcode);
   }
   else
+  if (expr->type == EXPR_BUILTIN)
+  {
+    compile(OP_MARK);
+
+    if (expr->args)
+      process(expr->args, 0, 0);
+
+    compile(expr->opcode);
+    compile(OP_LIMIT)->offset = expr->results;
+  }
+  else
   if (expr->type == EXPR_IF)
   {
+    if (expr->args)
+      process(expr->args, 0, 0);
+
     compile(OP_TEST);
     code_t *jump = compile(OP_JFALSE);
 
@@ -591,6 +756,12 @@ process (expr_t *expr, int assign, int index)
   else
   if (expr->type == EXPR_WHILE)
   {
+    code_t *loop = compile(OP_LOOP);
+    int begin = code_count;
+
+    if (expr->args)
+      process(expr->args, 0, 0);
+
     compile(OP_TEST);
     code_t *jump = compile(OP_JFALSE);
 
@@ -599,10 +770,16 @@ process (expr_t *expr, int assign, int index)
 
     compile(OP_JMP)->offset = begin;
     jump->offset = code_count;
+
+    loop->offset = code_count;
+    compile(OP_UNLOOP);
   }
   else
   if (expr->type == EXPR_FUNCTION)
   {
+    if (expr->args)
+      process(expr->args, 0, 0);
+
     compile(OP_MARK);
     code_t *entry = compile(OP_LIT);
 
@@ -628,6 +805,43 @@ process (expr_t *expr, int assign, int index)
     compile(OP_LIMIT)->offset = 1;
   }
   else
+  if (expr->type == EXPR_RETURN)
+  {
+    if (expr->args)
+      process(expr->args, 0, 0);
+
+    compile(OP_REPLY);
+    process(expr->vals[0], 0, 0);
+    compile(OP_RETURN);
+  }
+  else
+  if (expr->type == EXPR_VEC)
+  {
+    compile(OP_MARK);
+
+    if (expr->args)
+      process(expr->args, 0, 0);
+
+    compile(OP_LITSTACK);
+    compile(OP_LIMIT)->offset = 1;
+  }
+  else
+  if (expr->type == EXPR_MAP)
+  {
+    compile(OP_MARK);
+    compile(OP_SCOPE);
+    compile(OP_SMUDGE);
+
+    if (expr->args)
+      process(expr->args, 0, 0);
+
+    for (int i = 0; i < expr->valc; i++)
+      process(expr->vals[i], 0, 0);
+
+    compile(OP_LITSCOPE);
+    compile(OP_LIMIT)->offset = 1;
+  }
+  else
   {
     ensure(0)
       errorf("unexpected expression type: %d", expr->type);
@@ -647,7 +861,7 @@ source (char *s)
   int mark = depth();
 
   while (s[offset])
-    offset += parse(&s[offset], 0, 0);
+    offset += parse(&s[offset], RESULTS_DISCARD, PARSE_GREEDY);
 
   for (int i = mark; i < depth(); i++)
     process(item(i)[0], 0, 0);

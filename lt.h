@@ -47,20 +47,23 @@ typedef struct {
 } func_t;
 
 typedef struct {
+  int64_t *items;
+  int count;
+  int limit;
+} ivec_t;
+
+typedef struct {
   vec_t *stack;
   vec_t *other;
   vec_t *scopes;
   vec_t *selves;
-  int *calls;
-  int call_count;
-  int call_limit;
+  ivec_t calls;
+  ivec_t loops;
+  ivec_t marks;
   int ip;
   int flags;
   int ref_count;
   int state;
-  int *marks;
-  int mark_count;
-  int mark_limit;
 } cor_t;
 
 #define COR_SUSPENDED 0
@@ -78,6 +81,11 @@ struct wrapper {
 void* heap_alloc (unsigned int);
 void* heap_realloc (void*, unsigned int);
 void heap_free (void*);
+void ivec_init (ivec_t*);
+void ivec_push (ivec_t*, int64_t);
+int64_t* ivec_cell (ivec_t*, int);
+int64_t ivec_pop (ivec_t*);
+void ivec_empty (ivec_t*);
 int is_bool (void*);
 int is_int (void*);
 int is_dbl (void*);

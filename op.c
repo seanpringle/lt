@@ -110,7 +110,7 @@ op_yield ()
 
   src->stack->count -= items;
   src->state = COR_SUSPENDED;
-  dst->marks[dst->mark_count-1] += items;
+  ivec_cell(&dst->marks, -1)[0] += items;
 
   discard(src);
 }
@@ -120,20 +120,11 @@ op_call ()
 {
   op_scope();
 
-  if (routine()->call_count == routine()->call_limit)
-  {
-    routine()->call_limit += 32;
-    routine()->calls = heap_realloc(routine()->calls, sizeof(int) * routine()->call_limit);
-
-    ensure(routine()->calls)
-    {
-      stacktrace();
-      errorf("heap_realloc calls");
-    }
-  }
-
   void *ptr = pop();
-  routine()->calls[routine()->call_count++] = routine()->ip;
+
+  ivec_push(&routine()->calls, routine()->loops.count);
+  ivec_push(&routine()->calls, routine()->marks.count);
+  ivec_push(&routine()->calls, routine()->ip);
 
   ensure(is_int(ptr))
   {
@@ -157,14 +148,44 @@ op_return ()
 {
   op_unscope();
 
-  if (routine()->call_count == 0)
+  if (routine()->calls.count == 0)
   {
     routine()->state = COR_DEAD;
     op_yield();
     return;
   }
 
-  routine()->ip = routine()->calls[--routine()->call_count];
+  routine()->ip = ivec_pop(&routine()->calls);
+
+  ensure (ivec_pop(&routine()->calls) == routine()->marks.count)
+    errorf("mark stack mismatch (return)");
+
+  ensure (ivec_pop(&routine()->calls) == routine()->loops.count)
+    errorf("loop stack mismatch (return)");
+}
+
+void
+op_reply ()
+{
+  routine()->marks.count = ivec_cell(&routine()->calls, -2)[0];
+  routine()->loops.count = ivec_cell(&routine()->calls, -3)[0];
+  while (depth()) op_drop();
+}
+
+void
+op_break ()
+{
+  routine()->ip = ivec_cell(&routine()->loops, -1)[0];
+  routine()->marks.count = ivec_cell(&routine()->loops, -2)[0];
+  while (depth()) op_drop();
+}
+
+void
+op_continue ()
+{
+  routine()->ip = ivec_cell(&routine()->loops, -1)[0]-1;
+  routine()->marks.count = ivec_cell(&routine()->loops, -2)[0];
+  while (depth()) op_drop();
 }
 
 void
@@ -215,29 +236,39 @@ op_litscope ()
 }
 
 void
+op_loop ()
+{
+  ivec_push(&routine()->loops, routine()->marks.count);
+  ivec_push(&routine()->loops, code[routine()->ip-1].offset);
+}
+
+void
+op_unloop ()
+{
+  ivec_pop(&routine()->loops);
+
+  ensure (ivec_pop(&routine()->loops) == routine()->marks.count)
+    errorf("mark stack mismatch (unloop)");
+}
+
+void
 op_mark ()
 {
-  if (routine()->mark_count == routine()->mark_limit)
-  {
-    routine()->mark_limit += 32;
-    routine()->marks = heap_realloc(routine()->marks, sizeof(int) * routine()->mark_limit);
+  ivec_push(&routine()->marks, stack()->count);
+}
 
-    ensure(routine()->marks)
-    {
-      stacktrace();
-      errorf("heap_realloc marks");
-    }
-  }
-  routine()->marks[routine()->mark_count++] = stack()->count;
+void
+op_unmark ()
+{
+  ivec_pop(&routine()->marks);
 }
 
 void
 op_limit ()
 {
   int count = code[routine()->ip-1].offset;
-  int old_depth = routine()->marks[routine()->mark_count-1];
+  int old_depth = ivec_pop(&routine()->marks);
   int req_depth = old_depth + count;
-  routine()->mark_count--;
   if (count >= 0)
   {
     while (req_depth < stack()->count) op_drop();
@@ -273,13 +304,6 @@ void
 op_local ()
 {
   push(copy(scope_reading()));
-}
-
-void
-op_defnil ()
-{
-  while (depth() < code[routine()->ip-1].offset)
-    push(NULL);
 }
 
 void
@@ -367,15 +391,6 @@ op_jtrue ()
 }
 
 void
-op_define ()
-{
-  char *key = pop();
-  char *val = pop();
-  map_set(scope_writing(), key)[0] = val;
-  discard(key);
-}
-
-void
 op_for ()
 {
   void *name = code[routine()->ip-1].ptr;
@@ -421,7 +436,7 @@ op_keys ()
       push(copy(node->key));
 
   op_litstack();
-  routine()->mark_count--;
+  ivec_pop(&routine()->marks);
 }
 
 void
@@ -435,7 +450,7 @@ op_values ()
       push(copy(node->val));
 
   op_litstack();
-  routine()->mark_count--;
+  ivec_pop(&routine()->marks);
 }
 
 void
@@ -676,6 +691,13 @@ op_eq ()
   push_flag(equal(a, b));
   discard(a);
   discard(b);
+}
+
+void
+op_ne ()
+{
+  op_eq();
+  op_not();
 }
 
 void

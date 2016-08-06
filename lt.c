@@ -113,7 +113,13 @@ func_t funcs[] = {
   [OP_UNSCOPE] = { .name = "unscope", .func = op_unscope },
   [OP_LITSCOPE] = { .name = "litscope", .func = op_litscope },
   [OP_MARK] = { .name = "mark", .func = op_mark },
+  [OP_UNMARK] = { .name = "unmark", .func = op_unmark },
   [OP_LIMIT] = { .name = "limit", .func = op_limit },
+  [OP_LOOP] = { .name = "loop", .func = op_loop },
+  [OP_UNLOOP] = { .name = "unloop", .func = op_unloop },
+  [OP_REPLY] = { .name = "reply", .func = op_reply },
+  [OP_BREAK] = { .name = "break", .func = op_break },
+  [OP_CONTINUE] = { .name = "continue", .func = op_continue },
   [OP_TEST] = { .name = "test", .func = op_test },
   [OP_JMP] = { .name = "jmp", .func = op_jmp },
   [OP_JFALSE] = { .name = "jfalse", .func = op_jfalse },
@@ -128,9 +134,7 @@ func_t funcs[] = {
   [OP_SHUNT] = { .name = "shunt", .func = op_shunt },
   [OP_TRUE] = { .name = "true", .func = op_true },
   [OP_FALSE] = { .name = "false", .func = op_false },
-  [OP_DEFNIL] = { .name = "defnil", .func = op_defnil },
   [OP_LIT] = { .name = "lit", .func = op_lit },
-  [OP_DEFINE] = { .name = "define", .func = op_define },
   [OP_ASSIGN] = { .name = "assign", .func = op_assign },
   [OP_ASSIGN_LIT] = { .name = "assign_lit", .func = op_assign_lit },
   [OP_FIND] = { .name = "find", .func = op_find },
@@ -150,6 +154,7 @@ func_t funcs[] = {
   [OP_MOD] = { .name = "mod", .func = op_mod },
   [OP_NOT] = { .name = "not", .func = op_not },
   [OP_EQ] = { .name = "eq", .func = op_eq },
+  [OP_NE] = { .name = "ne", .func = op_ne },
   [OP_LT] = { .name = "lt", .func = op_lt },
   [OP_LT_LIT] = { .name = "lt_lit", .func = op_lt_lit },
   [OP_LTE] = { .name = "lte", .func = op_lte },
@@ -204,6 +209,53 @@ heap_free (void *ptr)
   }
 }
 
+void 
+ivec_init (ivec_t *ivec)
+{
+  memset(ivec, 0, sizeof(ivec_t));
+  ivec->count = 0;
+  ivec->limit = 8;
+  ivec->items = malloc(sizeof(int64_t) * ivec->limit);
+  
+  ensure(ivec->items)
+    errorf("%s malloc %ld", __func__, sizeof(int64_t) * ivec->limit);
+}
+
+void 
+ivec_push (ivec_t *ivec, int64_t item)
+{
+  if (ivec->count == ivec->limit)
+  {
+    ivec->limit += 8;
+    ivec->items = realloc(ivec->items, sizeof(int64_t) * ivec->limit);
+
+    ensure(ivec->items)
+      errorf("%s realloc %ld", __func__, sizeof(int64_t) * ivec->limit);
+  }
+  ivec->items[ivec->count++] = item;
+}
+
+int64_t*
+ivec_cell (ivec_t *ivec, int index)
+{
+//  ensure ((index >= 0 && index < ivec->count) || (index < 0 && index*-1 < ivec->count))
+//    errorf("%s out of bounds %d", __func__, index);
+  return index < 0 ? &ivec->items[ivec->count+index]: &ivec->items[index];
+}
+
+int64_t 
+ivec_pop (ivec_t *ivec)
+{
+  return ivec->items[--ivec->count];
+}
+
+void 
+ivec_empty (ivec_t *ivec)
+{
+  free(ivec->items);
+  memset(ivec, 0, sizeof(ivec_t));
+}
+
 cor_t*
 routine ()
 {
@@ -220,17 +272,14 @@ cor_alloc ()
   cor->other = vec_incref(vec_alloc());
   cor->selves = vec_incref(vec_alloc());
   cor->scopes = vec_incref(vec_alloc());
-  cor->call_count = 0;
-  cor->call_limit = 32;
-  cor->calls = heap_alloc(sizeof(int) * cor->call_limit);
-  cor->mark_count = 0;
-  cor->mark_limit = 32;
-  cor->marks = heap_alloc(sizeof(int) * cor->mark_limit);
+  ivec_init(&cor->calls);
+  ivec_init(&cor->loops);
+  ivec_init(&cor->marks);
   cor->ref_count = 0;
   cor->flags = 0;
   cor->ip = 0;
   cor->state = COR_SUSPENDED;
-
+  ivec_push(&cor->marks, 0);
   return cor;
 }
 
@@ -250,7 +299,9 @@ cor_decref (cor_t *cor)
     vec_decref(cor->other);
     vec_decref(cor->selves);
     vec_decref(cor->scopes);
-    heap_free(cor->calls);
+    ivec_empty(&cor->calls);
+    ivec_empty(&cor->loops);
+    ivec_empty(&cor->marks);
     memset(cor, 0, sizeof(cor_t));
     cor = NULL;
   }
@@ -430,7 +481,7 @@ self ()
 int
 depth ()
 {
-  return stack()->count - routine()->marks[routine()->mark_count-1];
+  return stack()->count - ivec_cell(&routine()->marks, -1)[0];
 }
 
 void**
@@ -613,8 +664,8 @@ decompile (code_t *c)
 void stacktrace ()
 {
   decompile(&code[routine()->ip-1]);
-  for (int i = routine()->call_count-1; i >= 0; i--)
-    decompile(&code[routine()->calls[i]-1]);
+  for (int i = routine()->calls.count-1; i >= 0; i--)
+    decompile(&code[ivec_cell(&routine()->calls, i)[0]-1]);
 }
 
 void

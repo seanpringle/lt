@@ -36,13 +36,18 @@ void op_litstack ();
 void op_unscope ();
 void op_litscope ();
 void op_mark ();
+void op_unmark ();
 void op_limit ();
+void op_loop ();
+void op_unloop ();
+void op_reply ();
+void op_break ();
+void op_continue ();
 void op_string ();
 void op_array ();
 void op_table ();
 void op_global ();
 void op_local ();
-void op_defnil ();
 void op_nil ();
 void op_self ();
 void op_self_push ();
@@ -56,7 +61,6 @@ void op_test ();
 void op_jmp ();
 void op_jfalse ();
 void op_jtrue ();
-void op_define ();
 void op_for ();
 void op_keys ();
 void op_values ();
@@ -76,6 +80,7 @@ void op_mul ();
 void op_div ();
 void op_mod ();
 void op_eq ();
+void op_ne ();
 void op_lt ();
 void op_lt_lit ();
 void op_gt ();
@@ -108,7 +113,13 @@ enum {
   OP_UNSCOPE,
   OP_LITSCOPE,
   OP_MARK,
+  OP_UNMARK,
   OP_LIMIT,
+  OP_LOOP,
+  OP_UNLOOP,
+  OP_REPLY,
+  OP_BREAK,
+  OP_CONTINUE,
   OP_TEST,
   OP_JMP,
   OP_JFALSE,
@@ -124,9 +135,7 @@ enum {
   OP_SHUNT,
   OP_TRUE,
   OP_FALSE,
-  OP_DEFNIL,
   OP_LIT,
-  OP_DEFINE,
   OP_ASSIGN,
   OP_ASSIGN_LIT,
   OP_FIND,
@@ -146,6 +155,7 @@ enum {
   OP_MOD,
   OP_NOT,
   OP_EQ,
+  OP_NE,
   OP_LT,
   OP_LT_LIT,
   OP_GT,
