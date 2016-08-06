@@ -112,6 +112,7 @@ void push_int (int64_t);
 void push_dbl (double);
 void push_flag (int);
 void* pop ();
+int pop_bool ();
 int64_t pop_int ();
 double pop_dbl ();
 void* top ();

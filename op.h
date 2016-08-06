@@ -53,6 +53,7 @@ void op_self ();
 void op_self_push ();
 void op_self_drop ();
 void op_shunt ();
+void op_shift ();
 void op_true ();
 void op_false ();
 void op_drop ();
@@ -133,6 +134,7 @@ enum {
   OP_SELF_PUSH,
   OP_SELF_DROP,
   OP_SHUNT,
+  OP_SHIFT,
   OP_TRUE,
   OP_FALSE,
   OP_LIT,

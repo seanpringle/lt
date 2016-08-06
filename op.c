@@ -331,6 +331,12 @@ op_shunt ()
 }
 
 void
+op_shift ()
+{
+  push(vec_pop(routine()->other));
+}
+
+void
 op_nil ()
 {
   push(NULL);
@@ -751,7 +757,7 @@ op_gte ()
 void
 op_not ()
 {
-  push_flag(pop_int() == 0);
+  push_flag(pop_bool() == 0);
 }
 
 void

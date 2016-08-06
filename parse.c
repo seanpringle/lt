@@ -113,8 +113,20 @@ expr_alloc ()
 }
 
 void
+expr_keys_vals (expr_t *expr)
+{
+  if (!expr->keys)
+  {
+    expr->keys = vec_incref(vec_alloc());
+    expr->vals = vec_incref(vec_alloc());
+  }
+}
+
+void
 expr_free (expr_t *expr)
 {
+  if (expr->keys) { expr->keys->count = 0; discard(expr->keys); }
+  if (expr->vals) { expr->vals->count = 0; discard(expr->vals); }
   free(expr);
 }
 
@@ -137,6 +149,7 @@ parse_block (char *source, expr_t *expr)
   int length = 0;
   int found_end = 0;
   int offset = skip_gap(source);
+  expr_keys_vals(expr);
 
   if (peek(&source[offset], "do"))
     offset += 2;
@@ -156,7 +169,7 @@ parse_block (char *source, expr_t *expr)
     }
 
     offset += parse(&source[offset], RESULTS_DISCARD, PARSE_GREEDY);
-    expr->vals[expr->valc++] = pop();
+    vec_push(expr->vals)[0] = pop();
   }
 
   ensure (found_end)
@@ -172,6 +185,7 @@ parse_branch (char *source, expr_t *expr)
   int found_else = 0;
   int found_end = 0;
   int offset = skip_gap(source);
+  expr_keys_vals(expr);
 
   if (peek(&source[offset], "then"))
     offset += 4;
@@ -197,7 +211,7 @@ parse_branch (char *source, expr_t *expr)
     }
 
     offset += parse(&source[offset], RESULTS_DISCARD, PARSE_GREEDY);
-    expr->vals[expr->valc++] = pop();
+    vec_push(expr->vals)[0] = pop();
   }
 
   if (found_else)
@@ -217,18 +231,18 @@ parse_branch (char *source, expr_t *expr)
       }
 
       offset += parse(&source[offset], RESULTS_DISCARD, PARSE_GREEDY);
-      expr->keys[expr->keyc++] = pop();
+      vec_push(expr->keys)[0] = pop();
     }
   }
 
   ensure (found_end)
     errorf("expected keyword 'end': %s", source);
 
-  if (expr->valc)
-    expr->vals[expr->valc-1]->results = 1;
+  if (expr->vals && expr->vals->count)
+    ((expr_t*)(vec_get(expr->vals, expr->vals->count-1)[0]))->results = 1;
 
-  if (expr->keyc)
-    expr->keys[expr->keyc-1]->results = 1;
+  if (expr->keys && expr->keys->count)
+    ((expr_t*)(vec_get(expr->keys, expr->keys->count-1)[0]))->results = 1;
 
   return offset;
 }
@@ -242,8 +256,13 @@ parse_arglist (char *source)
   if (source[offset] == '(')
   {
     offset++;
-    offset += parse(&source[offset], RESULTS_ALL, PARSE_GREEDY);
     offset += skip_gap(&source[offset]);
+
+    if (source[offset] != ')')
+    {
+      offset += parse(&source[offset], RESULTS_ALL, PARSE_GREEDY);
+      offset += skip_gap(&source[offset]);
+    }
 
     ensure (source[offset] == ')')
       errorf("expected closing paren: %s", source);
@@ -317,6 +336,7 @@ parse_item (char *source)
       {
         offset += 8;
         expr->type = EXPR_FUNCTION;
+        expr_keys_vals(expr);
 
         offset += skip_gap(&source[offset]);
 
@@ -359,7 +379,7 @@ parse_item (char *source)
             expr_t *param = expr_alloc();
             param->type = EXPR_VARIABLE;
             param->item = substr(&source[offset], 0, length);
-            expr->keys[expr->keyc++] = param;
+            vec_push(expr->keys)[0] = param;
 
             offset += length;
           }
@@ -377,7 +397,7 @@ parse_item (char *source)
         if (!peek(&source[offset], "end"))
         {
           offset += parse(&source[offset], RESULTS_ALL, PARSE_GREEDY);
-          expr->vals[expr->valc++] = pop();
+          expr->args = pop();
         }
       }
       else
@@ -425,6 +445,16 @@ parse_item (char *source)
         expr->results = -1;
       }
       else
+      if (peek(&source[offset], "not"))
+      {
+        offset += 3;
+        expr->type = EXPR_OPCODE;
+        expr->opcode = OP_NOT;
+        offset += parse(&source[offset], RESULTS_FIRST, PARSE_GREEDY);
+        expr->args = pop();
+        expr->results = 1;
+      }
+      else
       {
         expr->item = substr(&source[offset], 0, length);
         offset += length;
@@ -454,7 +484,7 @@ parse_item (char *source)
     expr->type = EXPR_OPCODE;
     expr->opcode = OP_COUNT;
     offset += parse(&source[offset], RESULTS_DISCARD, PARSE_GREEDY);
-    expr->vals[expr->valc++] = pop();
+    expr->args = pop();
   }
   else
   if (source[offset] == '[')
@@ -474,6 +504,7 @@ parse_item (char *source)
   {
     offset++;
     expr->type = EXPR_MAP;
+    expr_keys_vals(expr);
 
     while (source[offset])
     {
@@ -493,7 +524,7 @@ parse_item (char *source)
         continue;
       }
       offset += parse(&source[offset], RESULTS_DISCARD, PARSE_KEYVAL);
-      expr->vals[expr->valc++] = pop();
+      vec_push(expr->vals)[0] = pop();
     }
   }
   else
@@ -502,15 +533,38 @@ parse_item (char *source)
       errorf("what: %s", &source[offset]);
   }
 
-  offset += skip_gap(&source[offset]);
-
-  if (source[offset] == '(')
+  while (source[offset])
   {
-    expr->call = 1;
-    offset += parse_arglist(&source[offset]);
-    expr->args = pop();
-  }
+    if ((length = skip_gap(&source[offset])) > 0)
+    {
+      offset += length;
+      continue;
+    }
 
+    if (source[offset] == '(')
+    {
+      expr->call = 1;
+      offset += parse_arglist(&source[offset]);
+      expr->args = pop();
+      continue;
+    }
+
+    if (source[offset] == '.' && source[offset+1] != '.')
+    {
+      offset++;
+      offset += parse_item(&source[offset]);
+      expr->chain = pop();
+
+      ensure(expr->chain->type == EXPR_VARIABLE)
+        errorf("invalid method call: %s", source);
+
+      expr->chain->type = EXPR_LITERAL;
+      expr->chain->get = 1;
+      continue;
+    }
+
+    break;
+  }
   push(expr);
   return offset;
 }
@@ -528,6 +582,7 @@ operator_t operators[] = {
   { .name = ">=", .precedence = 1, .opcode = OP_GTE },
   { .name = "<",  .precedence = 1, .opcode = OP_LT },
   { .name = "<=", .precedence = 1, .opcode = OP_LTE },
+  { .name = "~",  .precedence = 1, .opcode = OP_MATCH },
   { .name = "..", .precedence = 2, .opcode = OP_CONCAT },
   { .name = "+",  .precedence = 2, .opcode = OP_ADD },
   { .name = "-",  .precedence = 2, .opcode = OP_SUB },
@@ -545,6 +600,7 @@ parse (char *source, int results, int mode)
   expr_t *expr = expr_alloc();
   expr->type = EXPR_MULTI;
   expr->results = results;
+  expr_keys_vals(expr);
 
   while (source[offset])
   {
@@ -588,8 +644,9 @@ parse (char *source, int results, int mode)
             expr_t *pair = expr_alloc();
             pair->type   = EXPR_OPCODE;
             pair->opcode = consume->opcode;
-            pair->vals[pair->valc++] = arguments[argument-2];
-            pair->vals[pair->valc++] = arguments[argument-1];
+            expr_keys_vals(pair);
+            vec_push(pair->vals)[0] = arguments[argument-2];
+            vec_push(pair->vals)[0] = arguments[argument-1];
             argument -= 2;
             arguments[argument++] = pair;
           }
@@ -606,8 +663,9 @@ parse (char *source, int results, int mode)
           expr_t *pair = expr_alloc();
           pair->type   = EXPR_OPCODE;
           pair->opcode = consume->opcode;
-          pair->vals[pair->valc++] = arguments[argument-2];
-          pair->vals[pair->valc++] = arguments[argument-1];
+          expr_keys_vals(pair);
+          vec_push(pair->vals)[0] = arguments[argument-2];
+          vec_push(pair->vals)[0] = arguments[argument-1];
           argument -= 2;
           arguments[argument++] = pair;
         }
@@ -615,7 +673,7 @@ parse (char *source, int results, int mode)
         ensure(argument == 1)
           errorf("unbalanced infix expression: %s", start);
 
-        expr->vals[expr->valc++] = arguments[0];
+        vec_push(expr->vals)[0] = arguments[0];
         break;
       }
     }
@@ -624,17 +682,16 @@ parse (char *source, int results, int mode)
 
     if (source[offset] == '=')
     {
-      ensure (expr->valc > 0)
+      ensure (expr->vals->count > 0)
         errorf("missing assignment name: %s", source);
 
-      ensure (expr->keyc == 0)
+      ensure (expr->keys->count == 0)
         errorf("invalid nested assignment: %s", source);
 
       offset++;
-      for (int i = 0; i < expr->valc; i++)
-        expr->keys[i] = expr->vals[i];
-      expr->keyc = expr->valc;
-      expr->valc = 0;
+      for (int i = 0; i < expr->vals->count; i++)
+        vec_push(expr->keys)[0] = vec_get(expr->vals, i)[0];
+      expr->vals->count = 0;
       continue;
     }
 
@@ -647,7 +704,7 @@ parse (char *source, int results, int mode)
     break;
   }
 
-  ensure(expr->valc > 0)
+  ensure(expr->vals->count > 0)
     errorf("missing assignment value: %s", source);
 
   push(expr);
@@ -667,11 +724,11 @@ process (expr_t *expr, int assign, int index)
     if (expr->results != -1)
       mark = compile(OP_MARK);
 
-    for (int i = 0; i < expr->valc; i++)
-      process(expr->vals[i], 0, 0);
+    if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
+      process(vec_get(expr->vals, i)[0], 0, 0);
 
-    for (int i = 0; i < expr->keyc; i++)
-      process(expr->keys[i], 1, i);
+    if (expr->keys) for (int i = 0; i < expr->keys->count; i++)
+      process(vec_get(expr->keys, i)[0], 1, i);
 
     if (expr->results != -1)
     {
@@ -699,10 +756,17 @@ process (expr_t *expr, int assign, int index)
   else
   if (expr->type == EXPR_LITERAL)
   {
-    if (expr->args)
-      process(expr->args, 0, 0);
-
     compile(OP_LIT)->ptr = expr->item;
+
+    if (expr->get)
+      compile(OP_GET);
+
+    if (expr->args)
+    {
+      compile(OP_SHUNT);
+      process(expr->args, 0, 0);
+      compile(OP_SHIFT);
+    }
   }
   else
   if (expr->type == EXPR_OPCODE)
@@ -710,8 +774,8 @@ process (expr_t *expr, int assign, int index)
     if (expr->args)
       process(expr->args, 0, 0);
 
-    for (int i = 0; i < expr->valc; i++)
-      process(expr->vals[i], 0, 0);
+    if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
+      process(vec_get(expr->vals, i)[0], 0, 0);
 
     compile(expr->opcode);
   }
@@ -735,16 +799,16 @@ process (expr_t *expr, int assign, int index)
     compile(OP_TEST);
     code_t *jump = compile(OP_JFALSE);
 
-    for (int i = 0; i < expr->valc; i++)
-      process(expr->vals[i], 0, 0);
+    if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
+      process(vec_get(expr->vals, i)[0], 0, 0);
 
-    if (expr->keyc)
+    if (expr->keys && expr->keys->count)
     {
       code_t *jump2 = compile(OP_JMP);
       jump->offset = code_count;
 
-      for (int i = 0; i < expr->keyc; i++)
-        process(expr->keys[i], 0, 0);
+      for (int i = 0; i < expr->keys->count; i++)
+        process(vec_get(expr->keys, i)[0], 0, 0);
 
       jump2->offset = code_count;
     }
@@ -765,8 +829,8 @@ process (expr_t *expr, int assign, int index)
     compile(OP_TEST);
     code_t *jump = compile(OP_JFALSE);
 
-    for (int i = 0; i < expr->valc; i++)
-      process(expr->vals[i], 0, 0);
+    if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
+      process(vec_get(expr->vals, i)[0], 0, 0);
 
     compile(OP_JMP)->offset = begin;
     jump->offset = code_count;
@@ -793,11 +857,11 @@ process (expr_t *expr, int assign, int index)
     code_t *jump = compile(OP_JMP);
     entry->ptr = to_int(code_count);
 
-    for (int i = 0; i < expr->keyc; i++)
-      process(expr->keys[i], 1, i);
+    if (expr->keys) for (int i = 0; i < expr->keys->count; i++)
+      process(vec_get(expr->keys, i)[0], 1, i);
 
-    for (int i = 0; i < expr->valc; i++)
-      process(expr->vals[i], 0, 0);
+    if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
+      process(vec_get(expr->vals, i)[0], 0, 0);
 
     compile(OP_RETURN);
     jump->offset = code_count;
@@ -807,11 +871,11 @@ process (expr_t *expr, int assign, int index)
   else
   if (expr->type == EXPR_RETURN)
   {
+    compile(OP_REPLY);
+
     if (expr->args)
       process(expr->args, 0, 0);
 
-    compile(OP_REPLY);
-    process(expr->vals[0], 0, 0);
     compile(OP_RETURN);
   }
   else
@@ -835,8 +899,8 @@ process (expr_t *expr, int assign, int index)
     if (expr->args)
       process(expr->args, 0, 0);
 
-    for (int i = 0; i < expr->valc; i++)
-      process(expr->vals[i], 0, 0);
+    if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
+      process(vec_get(expr->vals, i)[0], 0, 0);
 
     compile(OP_LITSCOPE);
     compile(OP_LIMIT)->offset = 1;
@@ -846,6 +910,9 @@ process (expr_t *expr, int assign, int index)
     ensure(0)
       errorf("unexpected expression type: %d", expr->type);
   }
+
+  if (expr->chain)
+    process(expr->chain, 0, 0);
 
   if (expr->call)
     compile(OP_CALL);

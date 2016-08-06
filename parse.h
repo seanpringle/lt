@@ -25,13 +25,13 @@ typedef struct _expr_t {
   int type;
   int opcode;
   int call;
+  int get;
   void *item;
   struct _expr_t *args;
+  struct _expr_t *chain;
   char *source;
-  int keyc;
-  struct _expr_t *keys[32];
-  int valc;
-  struct _expr_t *vals[32];
+  vec_t *keys;
+  vec_t *vals;
   int results;
 } expr_t;
 

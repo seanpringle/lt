@@ -132,6 +132,7 @@ func_t funcs[] = {
   [OP_SELF_PUSH] = { .name = "self_push", .func = op_self_push },
   [OP_SELF_DROP] = { .name = "self_drop", .func = op_self_drop },
   [OP_SHUNT] = { .name = "shunt", .func = op_shunt },
+  [OP_SHIFT] = { .name = "shift", .func = op_shift },
   [OP_TRUE] = { .name = "true", .func = op_true },
   [OP_FALSE] = { .name = "false", .func = op_false },
   [OP_LIT] = { .name = "lit", .func = op_lit },
@@ -616,11 +617,11 @@ compile (int op)
     return a;
   }
 
-  if (a && op == OP_CALL && a->op == OP_LIT)
-  {
-    a->op = OP_CALL_LIT;
-    return a;
-  }
+//  if (a && op == OP_CALL && a->op == OP_LIT)
+//  {
+//    a->op = OP_CALL_LIT;
+//    return a;
+//  }
 
   // math
 
