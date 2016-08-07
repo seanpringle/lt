@@ -59,6 +59,9 @@ enum {
 #define PARSE_GREEDY 1
 #define PARSE_KEYVAL 2
 
+#define PROCESS_ASSIGN (1<<0)
+#define PROCESS_CHAIN (1<<1)
+
 int
 isname (int c)
 {
@@ -546,7 +549,7 @@ parse_item (char *source)
       expr->call = 1;
       offset += parse_arglist(&source[offset]);
       expr->args = pop();
-      continue;
+      break;
     }
 
     if (source[offset] == '.' && source[offset+1] != '.')
@@ -554,13 +557,7 @@ parse_item (char *source)
       offset++;
       offset += parse_item(&source[offset]);
       expr->chain = pop();
-
-      ensure(expr->chain->type == EXPR_VARIABLE)
-        errorf("invalid method call: %s", source);
-
-      expr->chain->type = EXPR_LITERAL;
-      expr->chain->get = 1;
-      continue;
+      break;
     }
 
     break;
@@ -712,61 +709,63 @@ parse (char *source, int results, int mode)
 }
 
 void
-process (expr_t *expr, int assign, int index)
+process (expr_t *expr, int flags, int index)
 {
+  int flag_assign = flags & PROCESS_ASSIGN ? 1:0;
+  int flag_chain  = flags & PROCESS_CHAIN  ? 1:0;
+
   if (expr->type == EXPR_MULTI)
   {
     if (expr->args)
       process(expr->args, 0, 0);
 
-    code_t *mark = NULL;
-    
-    if (expr->results != -1)
-      mark = compile(OP_MARK);
+    compile(OP_MARK);
 
     if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
       process(vec_get(expr->vals, i)[0], 0, 0);
 
     if (expr->keys) for (int i = 0; i < expr->keys->count; i++)
-      process(vec_get(expr->keys, i)[0], 1, i);
+      process(vec_get(expr->keys, i)[0], PROCESS_ASSIGN, i);
 
-    if (expr->results != -1)
-    {
-      if (expr->results == 1 && hindsight(-2) == mark)
-      {
-        memmove(mark, hindsight(-1), sizeof(code_t));
-        code_count--;
-      }
-      else
-      {
-        compile(OP_LIMIT)->offset = expr->results;
-      }
-    }
+    compile(OP_LIMIT)->offset = expr->results;
   }
   else
   if (expr->type == EXPR_VARIABLE)
   {
-    if (expr->args)
-      process(expr->args, 0, 0);
+    if (expr->call)
+    {
+      if (flag_chain)
+        compile(OP_SHUNT);
 
-    code_t *code = compile(assign ? OP_ASSIGN_LIT: OP_FIND_LIT);
-    code->ptr = expr->item;
-    code->offset = index;
+      if (expr->args)
+        process(expr->args, 0, 0);
+
+      if (flag_chain)
+        compile(OP_SHIFT);
+
+      compile(OP_LIT)->ptr = expr->item;
+      
+      int opcode = flag_assign ? (flag_chain ? OP_SET: OP_ASSIGN)
+        : (flag_chain ? OP_GET: OP_FIND);
+
+      compile(opcode)->offset = index;
+
+      compile(OP_CALL);
+    }
+    else
+    {
+      compile(OP_LIT)->ptr = expr->item;
+      
+      int opcode = flag_assign ? (flag_chain ? OP_SET: OP_ASSIGN)
+        : (flag_chain ? OP_GET: OP_FIND);
+
+      compile(opcode)->offset = index;
+    }
   }
   else
   if (expr->type == EXPR_LITERAL)
   {
     compile(OP_LIT)->ptr = expr->item;
-
-    if (expr->get)
-      compile(OP_GET);
-
-    if (expr->args)
-    {
-      compile(OP_SHUNT);
-      process(expr->args, 0, 0);
-      compile(OP_SHIFT);
-    }
   }
   else
   if (expr->type == EXPR_OPCODE)
@@ -858,11 +857,12 @@ process (expr_t *expr, int assign, int index)
     entry->ptr = to_int(code_count);
 
     if (expr->keys) for (int i = 0; i < expr->keys->count; i++)
-      process(vec_get(expr->keys, i)[0], 1, i);
+      process(vec_get(expr->keys, i)[0], PROCESS_ASSIGN, i);
 
     if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
       process(vec_get(expr->vals, i)[0], 0, 0);
 
+    compile(OP_REPLY);
     compile(OP_RETURN);
     jump->offset = code_count;
 
@@ -912,10 +912,7 @@ process (expr_t *expr, int assign, int index)
   }
 
   if (expr->chain)
-    process(expr->chain, 0, 0);
-
-  if (expr->call)
-    compile(OP_CALL);
+    process(expr->chain, PROCESS_CHAIN, 0);
 
   expr_free(expr);
 }

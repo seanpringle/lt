@@ -25,7 +25,6 @@ typedef struct _expr_t {
   int type;
   int opcode;
   int call;
-  int get;
   void *item;
   struct _expr_t *args;
   struct _expr_t *chain;
