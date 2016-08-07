@@ -49,7 +49,9 @@ enum {
   EXPR_RETURN,
   EXPR_BUILTIN,
   EXPR_VEC,
-  EXPR_MAP
+  EXPR_MAP,
+  EXPR_AND,
+  EXPR_OR
 };
 
 #define RESULTS_DISCARD 0
@@ -61,6 +63,7 @@ enum {
 
 #define PROCESS_ASSIGN (1<<0)
 #define PROCESS_CHAIN (1<<1)
+#define PROCESS_INDEX (1<<2)
 
 int
 isname (int c)
@@ -536,6 +539,8 @@ parse_item (char *source)
       errorf("what: %s", &source[offset]);
   }
 
+  expr_t *prev = expr;
+
   while (source[offset])
   {
     if ((length = skip_gap(&source[offset])) > 0)
@@ -546,17 +551,31 @@ parse_item (char *source)
 
     if (source[offset] == '(')
     {
-      expr->call = 1;
+      prev->call = 1;
       offset += parse_arglist(&source[offset]);
-      expr->args = pop();
+      prev->args = pop();
       break;
+    }
+
+    if (source[offset] == '[')
+    {
+      offset++;
+      offset += parse_item(&source[offset]);
+      prev->index = pop();
+      prev = prev->index;
+      offset += skip_gap(&source[offset]);
+      ensure(source[offset] == ']')
+        errorf("expected closing bracket: %s", &source[offset]);
+      offset++;
+      continue;
     }
 
     if (source[offset] == '.' && source[offset+1] != '.')
     {
       offset++;
       offset += parse_item(&source[offset]);
-      expr->chain = pop();
+      prev->chain = pop();
+      prev = prev->index;
       break;
     }
 
@@ -573,6 +592,8 @@ typedef struct {
 } operator_t;
 
 operator_t operators[] = {
+  { .name = "and", .precedence = 0, .opcode = OP_AND },
+  { .name = "or", .precedence = 0, .opcode = OP_OR },
   { .name = "==", .precedence = 1, .opcode = OP_EQ },
   { .name = "!=", .precedence = 1, .opcode = OP_NE },
   { .name = ">",  .precedence = 1, .opcode = OP_GT },
@@ -581,11 +602,11 @@ operator_t operators[] = {
   { .name = "<=", .precedence = 1, .opcode = OP_LTE },
   { .name = "~",  .precedence = 1, .opcode = OP_MATCH },
   { .name = "..", .precedence = 2, .opcode = OP_CONCAT },
-  { .name = "+",  .precedence = 2, .opcode = OP_ADD },
-  { .name = "-",  .precedence = 2, .opcode = OP_SUB },
-  { .name = "*",  .precedence = 3, .opcode = OP_MUL },
-  { .name = "/",  .precedence = 3, .opcode = OP_DIV },
-  { .name = "%",  .precedence = 3, .opcode = OP_MOD },
+  { .name = "+",  .precedence = 3, .opcode = OP_ADD },
+  { .name = "-",  .precedence = 3, .opcode = OP_SUB },
+  { .name = "*",  .precedence = 4, .opcode = OP_MUL },
+  { .name = "/",  .precedence = 4, .opcode = OP_DIV },
+  { .name = "%",  .precedence = 4, .opcode = OP_MOD },
 };
 
 int
@@ -622,8 +643,17 @@ parse (char *source, int results, int mode)
         continue;
       }
 
-      offset += parse_item(&source[offset]);
-      arguments[argument++] = pop();
+      if (source[offset] == '(')
+      {
+        offset += parse_arglist(&source[offset]);
+        arguments[argument++] = pop();
+        arguments[argument-1]->results = 1;
+      }
+      else
+      {
+        offset += parse_item(&source[offset]);
+        arguments[argument++] = pop();
+      }
 
       int have_operator = 0;
       for (int i = 0; i < sizeof(operators) / sizeof(operator_t); i++)
@@ -713,6 +743,7 @@ process (expr_t *expr, int flags, int index)
 {
   int flag_assign = flags & PROCESS_ASSIGN ? 1:0;
   int flag_chain  = flags & PROCESS_CHAIN  ? 1:0;
+  int flag_index  = flags & PROCESS_INDEX  ? 1:0;
 
   if (expr->type == EXPR_MULTI)
   {
@@ -745,8 +776,8 @@ process (expr_t *expr, int flags, int index)
 
       compile(OP_LIT)->ptr = expr->item;
       
-      int opcode = flag_assign ? (flag_chain ? OP_SET: OP_ASSIGN)
-        : (flag_chain ? OP_GET: OP_FIND);
+      int opcode = flag_assign ? (flag_chain || flag_index 
+        ? OP_SET: OP_ASSIGN) : (flag_chain || flag_index ? OP_GET: OP_FIND);
 
       compile(opcode)->offset = index;
 
@@ -755,9 +786,12 @@ process (expr_t *expr, int flags, int index)
     else
     {
       compile(OP_LIT)->ptr = expr->item;
+
+      if (flag_index)
+        compile(OP_FIND);
       
-      int opcode = flag_assign ? (flag_chain ? OP_SET: OP_ASSIGN)
-        : (flag_chain ? OP_GET: OP_FIND);
+      int opcode = flag_assign ? (flag_chain || flag_index
+        ? OP_SET: OP_ASSIGN) : (flag_chain || flag_index ? OP_GET: OP_FIND);
 
       compile(opcode)->offset = index;
     }
@@ -766,6 +800,9 @@ process (expr_t *expr, int flags, int index)
   if (expr->type == EXPR_LITERAL)
   {
     compile(OP_LIT)->ptr = expr->item;
+
+    if (flag_index)
+      compile(flag_assign ? OP_SET: OP_GET);
   }
   else
   if (expr->type == EXPR_OPCODE)
@@ -795,8 +832,8 @@ process (expr_t *expr, int flags, int index)
     if (expr->args)
       process(expr->args, 0, 0);
 
-    compile(OP_TEST);
     code_t *jump = compile(OP_JFALSE);
+    compile(OP_DROP);
 
     if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
       process(vec_get(expr->vals, i)[0], 0, 0);
@@ -805,6 +842,7 @@ process (expr_t *expr, int flags, int index)
     {
       code_t *jump2 = compile(OP_JMP);
       jump->offset = code_count;
+      compile(OP_DROP);
 
       for (int i = 0; i < expr->keys->count; i++)
         process(vec_get(expr->keys, i)[0], 0, 0);
@@ -825,14 +863,15 @@ process (expr_t *expr, int flags, int index)
     if (expr->args)
       process(expr->args, 0, 0);
 
-    compile(OP_TEST);
     code_t *jump = compile(OP_JFALSE);
+    compile(OP_DROP);
 
     if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
       process(vec_get(expr->vals, i)[0], 0, 0);
 
     compile(OP_JMP)->offset = begin;
     jump->offset = code_count;
+    compile(OP_DROP);
 
     loop->offset = code_count;
     compile(OP_UNLOOP);
@@ -913,6 +952,9 @@ process (expr_t *expr, int flags, int index)
 
   if (expr->chain)
     process(expr->chain, PROCESS_CHAIN, 0);
+
+  if (expr->index)
+    process(expr->index, PROCESS_INDEX, 0);
 
   expr_free(expr);
 }

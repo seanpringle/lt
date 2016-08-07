@@ -57,8 +57,8 @@ void op_shift ();
 void op_true ();
 void op_false ();
 void op_drop ();
-void op_drop_all ();
-void op_test ();
+void op_and ();
+void op_or ();
 void op_jmp ();
 void op_jfalse ();
 void op_jtrue ();
@@ -121,7 +121,8 @@ enum {
   OP_REPLY,
   OP_BREAK,
   OP_CONTINUE,
-  OP_TEST,
+  OP_AND,
+  OP_OR,
   OP_JMP,
   OP_JFALSE,
   OP_JTRUE,
@@ -147,7 +148,6 @@ enum {
   OP_GET,
   OP_GET_LIT,
   OP_DROP,
-  OP_DROP_ALL,
   OP_ADD,
   OP_ADD_LIT,
   OP_NEG,

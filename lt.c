@@ -120,7 +120,8 @@ func_t funcs[] = {
   [OP_REPLY] = { .name = "reply", .func = op_reply },
   [OP_BREAK] = { .name = "break", .func = op_break },
   [OP_CONTINUE] = { .name = "continue", .func = op_continue },
-  [OP_TEST] = { .name = "test", .func = op_test },
+  [OP_AND] = { .name = "and", .func = op_and },
+  [OP_OR] = { .name = "or", .func = op_or },
   [OP_JMP] = { .name = "jmp", .func = op_jmp },
   [OP_JFALSE] = { .name = "jfalse", .func = op_jfalse },
   [OP_JTRUE] = { .name = "jtrue", .func = op_jtrue },
@@ -145,7 +146,6 @@ func_t funcs[] = {
   [OP_GET_LIT] = { .name = "get_lit", .func = op_get_lit },
   [OP_INHERIT] = { .name = "inherit", .func = op_inherit },
   [OP_DROP] = { .name = "drop", .func = op_drop },
-  [OP_DROP_ALL] = { .name = "drop_all", .func = op_drop_all },
   [OP_ADD] = { .name = "add", .func = op_add },
   [OP_ADD_LIT] = { .name = "add_lit", .func = op_add_lit },
   [OP_NEG] = { .name = "neg", .func = op_neg },
@@ -518,19 +518,7 @@ push_dbl (double n)
 void
 push_flag (int flag)
 {
-  if (code[routine()->ip].op == OP_TEST)
-  {
-    routine()->flags = 0;
-
-    if (flag)
-      routine()->flags |= FLAG_TRUE;
-
-    routine()->ip++;
-  }
-  else
-  {
-    push_bool(flag);
-  }
+  push_bool(flag);
 }
 
 void*

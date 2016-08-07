@@ -28,6 +28,7 @@ typedef struct _expr_t {
   void *item;
   struct _expr_t *args;
   struct _expr_t *chain;
+  struct _expr_t *index;
   char *source;
   vec_t *keys;
   vec_t *vals;

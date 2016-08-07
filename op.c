@@ -361,19 +361,45 @@ op_drop ()
 }
 
 void
-op_drop_all ()
+op_and ()
 {
-  while(depth() > 0)
-    op_drop();
+  void *b = pop();
+  void *a = pop();
+  if (truth(a) && truth(b))
+  {
+    discard(a);
+    push(b);
+  }
+  else
+  {
+    discard(a);
+    discard(b);
+    push(NULL);
+  }
 }
 
 void
-op_test ()
+op_or ()
 {
-  routine()->flags = 0;
-  if (truth(top()))
-    routine()->flags |= FLAG_TRUE;
-  op_drop();
+  void *b = pop();
+  void *a = pop();
+  if (truth(a))
+  {
+    discard(b);
+    push(a);
+  }
+  else
+  if (truth(b))
+  {
+    discard(a);
+    push(b);
+  }
+  else
+  {
+    discard(a);
+    discard(b);
+    push(NULL);
+  }
 }
 
 void
@@ -385,15 +411,13 @@ op_jmp ()
 void
 op_jfalse ()
 {
-  if (!(routine()->flags & FLAG_TRUE))
-    op_jmp();
+  if (!truth(top())) op_jmp();
 }
 
 void
 op_jtrue ()
 {
-  if (routine()->flags & FLAG_TRUE)
-    op_jmp();
+  if (truth(top())) op_jmp();
 }
 
 void
