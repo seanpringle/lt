@@ -589,24 +589,25 @@ typedef struct {
   char *name;
   int precedence;
   int opcode;
+  int argc;
 } operator_t;
 
 operator_t operators[] = {
-  { .name = "and", .precedence = 0, .opcode = OP_AND },
-  { .name = "or", .precedence = 0, .opcode = OP_OR },
-  { .name = "==", .precedence = 1, .opcode = OP_EQ },
-  { .name = "!=", .precedence = 1, .opcode = OP_NE },
-  { .name = ">",  .precedence = 1, .opcode = OP_GT },
-  { .name = ">=", .precedence = 1, .opcode = OP_GTE },
-  { .name = "<",  .precedence = 1, .opcode = OP_LT },
-  { .name = "<=", .precedence = 1, .opcode = OP_LTE },
-  { .name = "~",  .precedence = 1, .opcode = OP_MATCH },
-  { .name = "..", .precedence = 2, .opcode = OP_CONCAT },
-  { .name = "+",  .precedence = 3, .opcode = OP_ADD },
-  { .name = "-",  .precedence = 3, .opcode = OP_SUB },
-  { .name = "*",  .precedence = 4, .opcode = OP_MUL },
-  { .name = "/",  .precedence = 4, .opcode = OP_DIV },
-  { .name = "%",  .precedence = 4, .opcode = OP_MOD },
+  { .name = "and", .precedence = 0, .opcode = OP_AND    },
+  { .name = "or",  .precedence = 0, .opcode = OP_OR     },
+  { .name = "==",  .precedence = 1, .opcode = OP_EQ     },
+  { .name = "!=",  .precedence = 1, .opcode = OP_NE     },
+  { .name = ">",   .precedence = 1, .opcode = OP_GT     },
+  { .name = ">=",  .precedence = 1, .opcode = OP_GTE    },
+  { .name = "<",   .precedence = 1, .opcode = OP_LT     },
+  { .name = "<=",  .precedence = 1, .opcode = OP_LTE    },
+  { .name = "~",   .precedence = 1, .opcode = OP_MATCH  },
+  { .name = "..",  .precedence = 2, .opcode = OP_CONCAT },
+  { .name = "+",   .precedence = 3, .opcode = OP_ADD    },
+  { .name = "-",   .precedence = 3, .opcode = OP_SUB    },
+  { .name = "*",   .precedence = 4, .opcode = OP_MUL    },
+  { .name = "/",   .precedence = 4, .opcode = OP_DIV    },
+  { .name = "%",   .precedence = 4, .opcode = OP_MOD    },
 };
 
 int
@@ -775,8 +776,8 @@ process (expr_t *expr, int flags, int index)
         compile(OP_SHIFT);
 
       compile(OP_LIT)->ptr = expr->item;
-      
-      int opcode = flag_assign ? (flag_chain || flag_index 
+
+      int opcode = flag_assign ? (flag_chain || flag_index
         ? OP_SET: OP_ASSIGN) : (flag_chain || flag_index ? OP_GET: OP_FIND);
 
       compile(opcode)->offset = index;
@@ -789,7 +790,7 @@ process (expr_t *expr, int flags, int index)
 
       if (flag_index)
         compile(OP_FIND);
-      
+
       int opcode = flag_assign ? (flag_chain || flag_index
         ? OP_SET: OP_ASSIGN) : (flag_chain || flag_index ? OP_GET: OP_FIND);
 
@@ -810,10 +811,20 @@ process (expr_t *expr, int flags, int index)
     if (expr->args)
       process(expr->args, 0, 0);
 
-    if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
-      process(vec_get(expr->vals, i)[0], 0, 0);
+    if (expr->opcode == OP_AND || expr->opcode == OP_OR)
+    {
+      process(vec_get(expr->vals, 0)[0], 0, 0);
+      code_t *jump = compile(expr->opcode);
+      process(vec_get(expr->vals, 1)[0], 0, 0);
+      jump->offset = code_count;
+    }
+    else
+    {
+      if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
+        process(vec_get(expr->vals, i)[0], 0, 0);
 
-    compile(expr->opcode);
+      compile(expr->opcode);
+    }
   }
   else
   if (expr->type == EXPR_BUILTIN)

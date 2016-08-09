@@ -210,19 +210,19 @@ heap_free (void *ptr)
   }
 }
 
-void 
+void
 ivec_init (ivec_t *ivec)
 {
   memset(ivec, 0, sizeof(ivec_t));
   ivec->count = 0;
   ivec->limit = 8;
   ivec->items = malloc(sizeof(int64_t) * ivec->limit);
-  
+
   ensure(ivec->items)
     errorf("%s malloc %ld", __func__, sizeof(int64_t) * ivec->limit);
 }
 
-void 
+void
 ivec_push (ivec_t *ivec, int64_t item)
 {
   if (ivec->count == ivec->limit)
@@ -244,13 +244,13 @@ ivec_cell (ivec_t *ivec, int index)
   return index < 0 ? &ivec->items[ivec->count+index]: &ivec->items[index];
 }
 
-int64_t 
+int64_t
 ivec_pop (ivec_t *ivec)
 {
   return ivec->items[--ivec->count];
 }
 
-void 
+void
 ivec_empty (ivec_t *ivec)
 {
   free(ivec->items);

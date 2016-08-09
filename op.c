@@ -361,48 +361,6 @@ op_drop ()
 }
 
 void
-op_and ()
-{
-  void *b = pop();
-  void *a = pop();
-  if (truth(a) && truth(b))
-  {
-    discard(a);
-    push(b);
-  }
-  else
-  {
-    discard(a);
-    discard(b);
-    push(NULL);
-  }
-}
-
-void
-op_or ()
-{
-  void *b = pop();
-  void *a = pop();
-  if (truth(a))
-  {
-    discard(b);
-    push(a);
-  }
-  else
-  if (truth(b))
-  {
-    discard(a);
-    push(b);
-  }
-  else
-  {
-    discard(a);
-    discard(b);
-    push(NULL);
-  }
-}
-
-void
 op_jmp ()
 {
   routine()->ip = code[routine()->ip-1].offset;
@@ -418,6 +376,20 @@ void
 op_jtrue ()
 {
   if (truth(top())) op_jmp();
+}
+
+void
+op_and ()
+{
+  if (!truth(top())) op_jmp();
+  else op_drop();
+}
+
+void
+op_or ()
+{
+  if (truth(top())) op_jmp();
+  else op_drop();
 }
 
 void

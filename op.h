@@ -57,11 +57,11 @@ void op_shift ();
 void op_true ();
 void op_false ();
 void op_drop ();
-void op_and ();
-void op_or ();
 void op_jmp ();
 void op_jfalse ();
 void op_jtrue ();
+void op_and ();
+void op_or ();
 void op_for ();
 void op_keys ();
 void op_values ();
@@ -121,11 +121,11 @@ enum {
   OP_REPLY,
   OP_BREAK,
   OP_CONTINUE,
-  OP_AND,
-  OP_OR,
   OP_JMP,
   OP_JFALSE,
   OP_JTRUE,
+  OP_AND,
+  OP_OR,
   OP_NEXT,
   OP_FOR,
   OP_KEYS,
