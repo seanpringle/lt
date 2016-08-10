@@ -50,8 +50,7 @@ enum {
   EXPR_BUILTIN,
   EXPR_VEC,
   EXPR_MAP,
-  EXPR_AND,
-  EXPR_OR
+  EXPR_FOR
 };
 
 #define RESULTS_DISCARD 0
@@ -331,6 +330,38 @@ parse_item (char *source)
       {
         offset += 5;
         expr->type = EXPR_WHILE;
+
+        offset += parse(&source[offset], RESULTS_FIRST, PARSE_GREEDY);
+        expr->args = pop();
+
+        offset += parse_block(&source[offset], expr);
+      }
+      else
+      if (peek(&source[offset], "for"))
+      {
+        offset += 3;
+        expr->type = EXPR_FOR;
+        expr_keys_vals(expr);
+
+        offset += skip_gap(&source[offset]);
+        ensure(isalpha(source[offset]))
+          errorf("expected variable: %s", &source[offset]);
+
+        length = str_skip(&source[offset], isname);
+        vec_push(expr->keys)[0] = substr(&source[offset], 0, length);
+        offset += length;
+
+        offset += skip_gap(&source[offset]);
+        if (source[offset] == ',')
+        {
+          offset++;
+          length = str_skip(&source[offset], isname);
+          vec_push(expr->keys)[0] = substr(&source[offset], 0, length);
+          offset += length;
+        }
+
+        offset += skip_gap(&source[offset]);
+        if (peek(&source[offset], "in")) offset += 2;
 
         offset += parse(&source[offset], RESULTS_FIRST, PARSE_GREEDY);
         expr->args = pop();
@@ -888,6 +919,32 @@ process (expr_t *expr, int flags, int index)
     compile(OP_UNLOOP);
   }
   else
+  if (expr->type == EXPR_FOR)
+  {
+    code_t *loop = compile(OP_LOOP);
+
+    if (expr->args)
+      process(expr->args, 0, 0);
+
+    compile(OP_LIT)->ptr = to_int(0);
+
+    int begin = code_count;
+
+    code_t *jump = compile(OP_FOR);
+    jump->ptr = expr->keys;
+    expr->keys = NULL;
+
+    if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
+      process(vec_get(expr->vals, i)[0], 0, 0);
+
+    compile(OP_JMP)->offset = begin;
+    jump->offset = code_count;
+    compile(OP_DROP);
+
+    loop->offset = code_count;
+    compile(OP_UNLOOP);
+  }
+  else
   if (expr->type == EXPR_FUNCTION)
   {
     if (expr->args)
@@ -904,7 +961,7 @@ process (expr_t *expr, int flags, int index)
     }
 
     code_t *jump = compile(OP_JMP);
-    entry->ptr = to_int(code_count);
+    entry->ptr = to_sub(code_count);
 
     if (expr->keys) for (int i = 0; i < expr->keys->count; i++)
       process(vec_get(expr->keys, i)[0], PROCESS_ASSIGN, i);

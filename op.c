@@ -126,13 +126,13 @@ op_call ()
   ivec_push(&routine()->calls, routine()->marks.count);
   ivec_push(&routine()->calls, routine()->ip);
 
-  ensure(is_int(ptr))
+  ensure(is_sub(ptr))
   {
     errorf("invalid function");
     stacktrace();
   }
 
-  routine()->ip = get_int(ptr);
+  routine()->ip = get_sub(ptr);
   discard(ptr);
 }
 
@@ -395,34 +395,76 @@ op_or ()
 void
 op_for ()
 {
-  void *name = code[routine()->ip-1].ptr;
+  vec_t *vars = code[routine()->ip-1].ptr;
+  int var = 0;
 
-  int step = pop_int();
+  void *item = pop();
   void *iter = top();
 
   if (is_int(iter) || is_dbl(iter))
   {
+    int step = get_int(item);
+
     if (step == get_int(iter))
     {
       routine()->ip = code[routine()->ip-1].offset;
     }
     else
     {
-      map_set(scope_writing(), name)[0] = to_int(step++);
-      push_int(step);
+      if (vars->count > 1)
+        map_set(scope_writing(), vec_get(vars, var++)[0])[0] = to_int(step);
+
+      map_set(scope_writing(), vec_get(vars, var++)[0])[0] = to_int(step);
+      push_int(++step);
     }
   }
   else
   if (is_vec(iter))
   {
-    if (step == count(iter))
+    int step = get_int(item);
+
+    if (step >= count(iter))
     {
       routine()->ip = code[routine()->ip-1].offset;
     }
     else
     {
-      map_set(scope_writing(), name)[0] = copy(vec_get(iter, step++)[0]);
-      push_int(step);
+      if (vars->count > 1)
+        map_set(scope_writing(), vec_get(vars, var++)[0])[0] = to_int(step);
+
+      map_set(scope_writing(), vec_get(vars, var++)[0])[0] = copy(vec_get(iter, step)[0]);
+      push_int(++step);
+    }
+  }
+  else
+  if (is_map(iter))
+  {
+    vec_t *keys = item;
+
+    if (is_int(item))
+    {
+      discard(item);
+      push(copy(top()));
+      op_keys();
+      keys = pop();
+      item = keys;
+    }
+
+    if (keys->count == 0)
+    {
+      routine()->ip = code[routine()->ip-1].offset;
+      discard(keys);
+    }
+    else
+    {
+      void *key = vec_pop(keys);
+
+      if (vars->count > 1)
+        map_set(scope_writing(), vec_get(vars, var++)[0])[0] = key;
+
+      map_set(scope_writing(), vec_get(vars, var++)[0])[0] = map_get(iter, key)[0];
+
+      push(keys);
     }
   }
 }

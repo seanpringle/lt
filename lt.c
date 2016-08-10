@@ -50,6 +50,7 @@ arena_t *strs;
 arena_t *vecs;
 arena_t *maps;
 arena_t *cors;
+arena_t *subs;
 
 int int_count;
 int int_created;
@@ -69,6 +70,9 @@ int map_destroyed;
 int cor_count;
 int cor_created;
 int cor_destroyed;
+int sub_count;
+int sub_created;
+int sub_destroyed;
 
 int heap_mem;
 int ints_mem;
@@ -77,6 +81,7 @@ int strs_mem;
 int vecs_mem;
 int maps_mem;
 int cors_mem;
+int subs_mem;
 
 map_t *scope_core;
 map_t *scope_global;
@@ -316,6 +321,7 @@ int is_str (void *ptr) { return arena_within(strs, ptr); }
 int is_vec (void *ptr) { return arena_within(vecs, ptr); }
 int is_map (void *ptr) { return arena_within(maps, ptr); }
 int is_cor (void *ptr) { return arena_within(cors, ptr); }
+int is_sub (void *ptr) { return arena_within(subs, ptr); }
 
 int
 discard (void *ptr)
@@ -327,6 +333,7 @@ discard (void *ptr)
   if (is_vec(ptr)) { vec_decref(ptr); return 1; }
   if (is_map(ptr)) { map_decref(ptr); return 1; }
   if (is_cor(ptr)) { cor_decref(ptr); return 1; }
+  if (is_sub(ptr)) return 0;
   return 1;
 }
 
@@ -339,6 +346,7 @@ copy (void *ptr)
   if (is_vec(ptr)) return vec_incref(ptr);
   if (is_map(ptr)) return map_incref(ptr);
   if (is_cor(ptr)) return cor_incref(ptr);
+  if (is_sub(ptr)) return ptr;
   return ptr;
 }
 
@@ -349,6 +357,7 @@ equal (void *a, void *b)
   if (is_int(a) && is_int(b)) return get_int(a) == get_int(b);
   if (is_dbl(a) && is_dbl(b)) return fabs(get_dbl(a) - get_dbl(b)) <= DBL_MIN;
   if (is_str(a) && is_str(b)) return !strcmp(a, b);
+  if (is_sub(a) && is_sub(b)) return get_sub(a) == get_sub(b);
 
   char *as = to_char(a);
   char *bs = to_char(b);
@@ -382,6 +391,7 @@ truth (void *a)
   if (is_bool(a)) return get_bool(a);
   if (is_int(a) && get_int(a) != 0) return 1;
   if (is_dbl(a) && fabs(get_dbl(a) > DBL_MIN)) return 1;
+  if (is_sub(a)) return 1;
   return count(a) != 0;
 }
 
@@ -446,8 +456,25 @@ to_char (void *ptr)
   if (is_vec(ptr)) return vec_char(ptr);
   if (is_map(ptr)) return map_char(ptr);
   if (is_cor(ptr)) return strf("cor()");
+  if (is_sub(ptr)) return strf("sub[%ld]", get_sub(ptr));
   if (!ptr) return strf("nil");
   return strf("ptr: %llu", (uint64_t)ptr);
+}
+
+int64_t*
+to_sub (int64_t n)
+{
+  int64_t *ptr = arena_alloc(subs, sizeof(int64_t));
+  sub_count++;
+  sub_created++;
+  *ptr = n;
+  return ptr;
+}
+
+int64_t
+get_sub (void *ptr)
+{
+  return is_sub(ptr) ? *((int64_t*)ptr): 0;
 }
 
 vec_t*
@@ -747,6 +774,7 @@ main (int argc, char const *argv[])
   vecs_mem = heap_mem * 0.01;
   maps_mem = heap_mem * 0.01;
   cors_mem = heap_mem * 0.01;
+  subs_mem = heap_mem * 0.01;
 
   heap = malloc(heap_mem);
   ensure(heap) errorf("malloc heap %u", heap_mem);
@@ -769,6 +797,9 @@ main (int argc, char const *argv[])
 
   cors = heap_alloc(cors_mem);
   arena_open(cors, cors_mem, sizeof(cor_t));
+
+  subs = heap_alloc(subs_mem);
+  arena_open(subs, subs_mem, sizeof(int64_t));
 
   int _bt = 1, _bf = 0;
   bool_true  = &_bt;
@@ -798,7 +829,7 @@ main (int argc, char const *argv[])
   for (int i = 0; i < sizeof(wrappers) / sizeof(struct wrapper); i++)
   {
     char *name = substr(wrappers[i].name, 0, strlen(wrappers[i].name));
-    map_set(wrappers[i].library[0], name)[0] = to_int(code_count);
+    map_set(wrappers[i].library[0], name)[0] = to_sub(code_count);
     compile(wrappers[i].op);
     compile(OP_RETURN);
     discard(name);
@@ -820,10 +851,10 @@ main (int argc, char const *argv[])
 
   run();
 
-  errorf("COUNT    ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d  cors: %3d", int_count, dbl_count, str_count, vec_count, map_count, cor_count);
-  errorf("CREATE   ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d  cors: %3d", int_created, dbl_created, str_created, vec_created, map_created, cor_created);
-  errorf("DESTROY  ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d  cors: %3d", int_destroyed, dbl_destroyed, str_destroyed, vec_destroyed, map_destroyed, cor_destroyed);
-  errorf("               %3d,        %3d,        %3d,        %3d,        %3d        %3d", int_count-(int_created-int_destroyed), dbl_count-(dbl_created-dbl_destroyed), str_count-(str_created-str_destroyed), vec_count-(vec_created-vec_destroyed), map_count-(map_created-map_destroyed), cor_count-(cor_created-cor_destroyed));
+  errorf("COUNT    ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d  cors: %3d  subs: %3d", int_count, dbl_count, str_count, vec_count, map_count, cor_count, sub_count);
+  errorf("CREATE   ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d  cors: %3d  subs: %3d", int_created, dbl_created, str_created, vec_created, map_created, cor_created, sub_created);
+  errorf("DESTROY  ints: %3d,  dbls: %3d,  strs: %3d,  vecs: %3d,  maps: %3d  cors: %3d  subs: %3d", int_destroyed, dbl_destroyed, str_destroyed, vec_destroyed, map_destroyed, cor_destroyed, sub_destroyed);
+  errorf("               %3d,        %3d,        %3d,        %3d,        %3d        %3d        %3d", int_count-(int_created-int_destroyed), dbl_count-(dbl_created-dbl_destroyed), str_count-(str_created-str_destroyed), vec_count-(vec_created-vec_destroyed), map_count-(map_created-map_destroyed), cor_count-(cor_created-cor_destroyed), sub_count-(sub_created-sub_destroyed));
 
   return 0;
 }
