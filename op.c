@@ -404,6 +404,7 @@ op_for ()
   if (is_int(iter) || is_dbl(iter))
   {
     int step = get_int(item);
+    discard(item);
 
     if (step == get_int(iter))
     {
@@ -422,6 +423,7 @@ op_for ()
   if (is_vec(iter))
   {
     int step = get_int(item);
+    discard(item);
 
     if (step >= count(iter))
     {
@@ -466,6 +468,11 @@ op_for ()
 
       push(keys);
     }
+  }
+  else
+  {
+    routine()->ip = code[routine()->ip-1].offset;
+    discard(item);
   }
 }
 

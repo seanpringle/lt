@@ -418,6 +418,7 @@ int64_t*
 to_int (int64_t n)
 {
   int64_t *ptr = arena_alloc(ints, sizeof(int64_t));
+  ensure(ptr) errorf("ints_mem exceeded");
   int_count++;
   int_created++;
   *ptr = n;
@@ -434,6 +435,7 @@ double*
 to_dbl (double n)
 {
   double *ptr = arena_alloc(dbls, sizeof(double));
+  ensure(ptr) errorf("dbls_mem exceeded");
   dbl_count++;
   dbl_created++;
   *ptr = n;
@@ -465,6 +467,7 @@ int64_t*
 to_sub (int64_t n)
 {
   int64_t *ptr = arena_alloc(subs, sizeof(int64_t));
+  ensure(ptr) errorf("subs_mem exceeded");
   sub_count++;
   sub_created++;
   *ptr = n;
