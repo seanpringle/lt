@@ -167,4 +167,6 @@ enum {
   OP_COUNT,
   OP_MATCH,
   OP_STATUS,
+
+  OP_CUSTOM
 };

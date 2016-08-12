@@ -97,8 +97,9 @@ code_t *code;
 int code_count;
 int code_limit;
 FILE *stream_output;
+int func_count = OP_CUSTOM;
 
-func_t funcs[] = {
+func_t funcs[1024] = {
   [OP_NOP] = { .name = "nop", .func = op_nop },
   [OP_PRINT] = { .name = "print", .func = op_print },
   [OP_COROUTINE] = { .name = "coroutine", .func = op_coroutine },

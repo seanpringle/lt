@@ -524,6 +524,23 @@ parse_item (char *source)
     offset += end - &source[offset];
   }
   else
+  if (source[offset] == '[' && source[offset+1] == '[')
+  {
+    expr->type = EXPR_LITERAL;
+
+    char *start = &source[offset+2];
+    char *end = start;
+
+    while (*end && !(end[0] == ']' && end[1] == ']'))
+      end = strchr(end, ']');
+
+    ensure (end[0] == ']' && end[1] == ']')
+      errorf("expected closing bracket: %s", &source[offset]);
+
+    expr->item = substr(start, 0, end - start);
+    offset += end - &source[offset] + 2;
+  }
+  else
   if (isdigit(source[offset]))
   {
     expr->type = EXPR_LITERAL;
@@ -539,23 +556,6 @@ parse_item (char *source)
     expr->opcode = OP_COUNT;
     offset += parse(&source[offset], RESULTS_FIRST, PARSE_GREEDY);
     expr->args = pop();
-  }
-  else
-  if (source[offset] == '[' && source[offset+1] == '[')
-  {
-    expr->type = EXPR_LITERAL;
-
-    char *start = &source[offset+2];
-    char *end = start;
-
-    while (*end && !(end[0] == ']' && end[1] == ']'))
-      end = strchr(end, ']');
-
-    ensure (end[0] == ']' && end[1] == ']')
-      errorf("expected closing bracket: %s", source);
-
-    expr->item = substr(start, 0, end - start);
-    offset = end - &source[offset] + 2;
   }
   else
   if (source[offset] == '[')
@@ -912,13 +912,16 @@ process (expr_t *expr, int flags, int index)
         }
 
         compile(OP_LIT)->ptr = substr(left, 0, right-left+(length ? 0:1));
+        compile(OP_CONCAT);
 
         left = finish;
 
         if (length)
         {
-          parse(start, RESULTS_FIRST, PARSE_GREEDY);
+          char *sub = substr(start, 0, length);
+          parse(sub, RESULTS_FIRST, PARSE_GREEDY);
           process(pop(), 0, 0);
+          discard(sub);
         }
 
         compile(OP_CONCAT);
