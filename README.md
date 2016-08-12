@@ -11,6 +11,7 @@ A rainy ~~day~~ week experiment to see what Lua syntax would be like with:
 - [x] Assignment is an expression (returns value)
 - [x] Ternary operator (inline-if expression)
 - [x] Pattern syntax is PCRE
+- [x] String interpolation
 - [x] Stricter prototype-style inheritance
 - [x] Userdata are all light pointers
 - [x] Reference counting
