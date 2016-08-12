@@ -16,7 +16,6 @@ A rainy ~~day~~ week experiment to see what Lua syntax would be like with:
 - [x] Reference counting
 - [ ] Concurrent cycle detection (heh!)
 - [ ] Avoid use of `longjmp`
-- [ ] Rethinking heredoc and `[[...]]`
 
 Don't think of LT as anything but an experiment. Bugs abound, and there's a heap of stuff not done (yet, or maybe ever...):
 
@@ -64,7 +63,7 @@ end
 stuff[#stuff] = 4
 ```
 
-The `[]` notation plays funny with Lua `[[...]]` strings. Adding spaces is a workaround, but feels wrong, so `[[...]]` isn't implemented yet.
+The `[]` notation plays funny with Lua `[[...]]` strings. To nest array literals, add spaces.
 
 ## 0-based indexing
 

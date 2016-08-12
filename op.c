@@ -41,6 +41,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "vec.h"
 #include "map.h"
 #include "lt.h"
+#include "parse.h"
 
 void
 op_nop ()
@@ -529,7 +530,10 @@ op_find ()
   void **ptr = map_get(scope_reading(), key);
   if (!ptr) ptr = map_get(scope_global, key);
   if (!ptr) ptr = map_get(scope_core, key);
+  if (!ptr && !strcmp(key, "global")) { op_global(); goto done; }
+  if (!ptr && !strcmp(key, "local")) { op_local(); goto done; }
   push(ptr ? copy(ptr[0]): NULL);
+done:
   discard(key);
 }
 
@@ -540,6 +544,8 @@ op_find_lit ()
   void **ptr = map_get(scope_reading(), key);
   if (!ptr) ptr = map_get(scope_global, key);
   if (!ptr) ptr = map_get(scope_core, key);
+  if (!ptr && !strcmp(key, "global")) { op_global(); return; }
+  if (!ptr && !strcmp(key, "local")) { op_local(); return; }
 
   ensure(ptr)
   {
@@ -552,10 +558,10 @@ op_find_lit ()
 void
 op_set ()
 {
-  void *val = pop();
   void *key = pop();
   void *dst = pop();
-  push(val);
+  int index = code[routine()->ip-1].offset;
+  void *val = index < depth() ? item(index)[0]: NULL;
 
   if (is_vec(dst) && is_int(key))
   {
@@ -651,7 +657,7 @@ op_add ()
   else
   {
     stacktrace();
-    abort();
+    ensure(0);
   }
 }
 
@@ -666,7 +672,7 @@ op_add_lit ()
   else
   {
     stacktrace();
-    abort();
+    ensure(0);
   }
 }
 
@@ -681,7 +687,7 @@ op_neg ()
   else
   {
     stacktrace();
-    abort();
+    ensure(0);
   }
 }
 
@@ -703,7 +709,7 @@ op_mul ()
   else
   {
     stacktrace();
-    abort();
+    ensure(0);
   }
 }
 
@@ -718,7 +724,7 @@ op_div ()
   else
   {
     stacktrace();
-    abort();
+    ensure(0);
   }
 }
 
@@ -730,7 +736,7 @@ op_mod ()
   else
   {
     stacktrace();
-    abort();
+    ensure(0);
   }
 }
 

@@ -180,6 +180,14 @@ struct wrapper wrappers[] = {
   { .library = &scope_core, .op = OP_VALUES,  .results = 1, .name = "values" },
 };
 
+void
+wtf (const char *file, unsigned int line, const char *func)
+{
+  fprintf(stderr, "wtf: %s %d %s\n", file, line, func);
+  fflush(stderr);
+  exit(EXIT_FAILURE);
+}
+
 void*
 heap_alloc (unsigned int bytes)
 {

@@ -21,9 +21,10 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-#define ensure(x) for ( ; !(x) ; exit(EXIT_FAILURE) )
+void wtf (const char *file, unsigned int line, const char *func);
+
+#define ensure(x) for ( ; !(x) ; wtf(__FILE__, __LINE__, __func__) )
 #define errorf(...) do { fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); fflush(stderr); } while(0)
-#define abort() ensure(0) errorf("abort %s %d %s", __FILE__, __LINE__, __func__)
 
 void *bool_true;
 void *bool_false;

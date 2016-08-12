@@ -65,9 +65,15 @@ enum {
 #define PROCESS_INDEX (1<<2)
 
 int
+isnamefirst (int c)
+{
+  return isalpha(c) || c == '_';
+}
+
+int
 isname (int c)
 {
-  return isalpha(c) || isdigit(c) || c == '_';
+  return isnamefirst(c) || isdigit(c);
 }
 
 int
@@ -112,7 +118,7 @@ peek (char *source, char *name)
 expr_t*
 expr_alloc ()
 {
-  expr_t *expr = malloc(sizeof(expr_t));
+  expr_t *expr = heap_alloc(sizeof(expr_t));
   memset(expr, 0, sizeof(expr_t));
   return expr;
 }
@@ -132,7 +138,7 @@ expr_free (expr_t *expr)
 {
   if (expr->keys) { expr->keys->count = 0; discard(expr->keys); }
   if (expr->vals) { expr->vals->count = 0; discard(expr->vals); }
-  free(expr);
+  heap_free(expr);
 }
 
 typedef struct {
@@ -293,7 +299,7 @@ parse_item (char *source)
   expr_t *expr = expr_alloc();
   expr->source = &source[offset];
 
-  if (isalpha(source[offset]))
+  if (isnamefirst(source[offset]))
   {
     expr->type = EXPR_VARIABLE;
     length = str_skip(&source[offset], isname);
@@ -320,9 +326,11 @@ parse_item (char *source)
         offset += 2;
         expr->type = EXPR_IF;
 
+        // conditions
         offset += parse(&source[offset], RESULTS_FIRST, PARSE_GREEDY);
         expr->args = pop();
 
+        // then block, optional else
         offset += parse_branch(&source[offset], expr);
       }
       else
@@ -331,9 +339,11 @@ parse_item (char *source)
         offset += 5;
         expr->type = EXPR_WHILE;
 
+        // conditions
         offset += parse(&source[offset], RESULTS_FIRST, PARSE_GREEDY);
         expr->args = pop();
 
+        // do block
         offset += parse_block(&source[offset], expr);
       }
       else
@@ -343,8 +353,9 @@ parse_item (char *source)
         expr->type = EXPR_FOR;
         expr_keys_vals(expr);
 
+        // key[,val] local variable names
         offset += skip_gap(&source[offset]);
-        ensure(isalpha(source[offset]))
+        ensure(isnamefirst(source[offset]))
           errorf("expected variable: %s", &source[offset]);
 
         length = str_skip(&source[offset], isname);
@@ -363,9 +374,11 @@ parse_item (char *source)
         offset += skip_gap(&source[offset]);
         if (peek(&source[offset], "in")) offset += 2;
 
+        // iterable
         offset += parse(&source[offset], RESULTS_FIRST, PARSE_GREEDY);
         expr->args = pop();
 
+        // do block
         offset += parse_block(&source[offset], expr);
       }
       else
@@ -377,7 +390,8 @@ parse_item (char *source)
 
         offset += skip_gap(&source[offset]);
 
-        if (isalpha(source[offset]))
+        // optional function name
+        if (isnamefirst(source[offset]))
         {
           length = str_skip(&source[offset], isname);
           expr->item = substr(&source[offset], 0, length);
@@ -386,6 +400,7 @@ parse_item (char *source)
 
         offset += skip_gap(&source[offset]);
 
+        // argument locals list
         if (source[offset] == '(')
         {
           offset++;
@@ -408,7 +423,7 @@ parse_item (char *source)
               break;
             }
 
-            ensure(isalpha(source[offset]))
+            ensure(isnamefirst(source[offset]))
               errorf("expected parameter: %s", &source[offset]);
 
             length = str_skip(&source[offset], isname);
@@ -421,6 +436,8 @@ parse_item (char *source)
             offset += length;
           }
         }
+
+        // do block
         offset += parse_block(&source[offset], expr);
       }
       else
@@ -520,8 +537,25 @@ parse_item (char *source)
     offset++;
     expr->type = EXPR_OPCODE;
     expr->opcode = OP_COUNT;
-    offset += parse(&source[offset], RESULTS_DISCARD, PARSE_GREEDY);
+    offset += parse(&source[offset], RESULTS_FIRST, PARSE_GREEDY);
     expr->args = pop();
+  }
+  else
+  if (source[offset] == '[' && source[offset+1] == '[')
+  {
+    expr->type = EXPR_LITERAL;
+
+    char *start = &source[offset+2];
+    char *end = start;
+
+    while (*end && !(end[0] == ']' && end[1] == ']'))
+      end = strchr(end, ']');
+
+    ensure (end[0] == ']' && end[1] == ']')
+      errorf("expected closing bracket: %s", source);
+
+    expr->item = substr(start, 0, end - start);
+    offset = end - &source[offset] + 2;
   }
   else
   if (source[offset] == '[')
@@ -777,24 +811,35 @@ process (expr_t *expr, int flags, int index)
   int flag_chain  = flags & PROCESS_CHAIN  ? 1:0;
   int flag_index  = flags & PROCESS_INDEX  ? 1:0;
 
+  // a multi-part expression: a[,b...] = expr[,expr...]
   if (expr->type == EXPR_MULTI)
   {
-    if (expr->args)
-      process(expr->args, 0, 0);
+    ensure(!expr->args);
+    ensure(expr->vals && expr->vals->count);
 
+    // stack frame
     compile(OP_MARK);
 
+    // stream the values onto the stack
     if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
       process(vec_get(expr->vals, i)[0], 0, 0);
 
+    // OP_SET|OP_ASSIGN index values from the bottom of the current stack frame
     if (expr->keys) for (int i = 0; i < expr->keys->count; i++)
       process(vec_get(expr->keys, i)[0], PROCESS_ASSIGN, i);
 
+    // end stack frame
     compile(OP_LIMIT)->offset = expr->results;
   }
   else
   if (expr->type == EXPR_VARIABLE)
   {
+    ensure(!expr->keys && !expr->vals);
+
+    // if we're assigning with chained expressions, only OP_SET|OP_ASSIGN the last one
+    int assign = flag_assign && !expr->chain;
+
+    // function or method call, optionally chained
     if (expr->call)
     {
       if (flag_chain)
@@ -808,7 +853,7 @@ process (expr_t *expr, int flags, int index)
 
       compile(OP_LIT)->ptr = expr->item;
 
-      int opcode = flag_assign ? (flag_chain || flag_index
+      int opcode = assign ? (flag_chain || flag_index
         ? OP_SET: OP_ASSIGN) : (flag_chain || flag_index ? OP_GET: OP_FIND);
 
       compile(opcode)->offset = index;
@@ -816,27 +861,84 @@ process (expr_t *expr, int flags, int index)
       compile(OP_CALL);
     }
     else
+    // variable reference, optionally chained
     {
       compile(OP_LIT)->ptr = expr->item;
 
       if (flag_index)
         compile(OP_FIND);
 
-      int opcode = flag_assign ? (flag_chain || flag_index
+      int opcode = assign ? (flag_chain || flag_index
         ? OP_SET: OP_ASSIGN) : (flag_chain || flag_index ? OP_GET: OP_FIND);
 
       compile(opcode)->offset = index;
     }
   }
   else
+  // string or number literal, optionally part of array chain a[b]["c"]
   if (expr->type == EXPR_LITERAL)
   {
-    compile(OP_LIT)->ptr = expr->item;
+    ensure(!expr->args && !expr->keys && !expr->vals);
+
+    char *dollar = is_str(expr->item) ? strchr(expr->item, '$'): NULL;
+
+    if (dollar && dollar < (char*)expr->item + strlen(expr->item) - 1)
+    {
+      char *str = expr->item;
+      char *left = str;
+      char *right = str;
+
+      compile(OP_LIT)->ptr = strf("");
+
+      while ((right = strchr(left, '$')) && right && *right)
+      {
+        char *start = right+1;
+        char *finish = start;
+        int length = 0;
+
+        if (*start == '{')
+        {
+          start++;
+          char *rbrace = strchr(start, '}');
+          ensure(rbrace)
+            errorf("missing closing brace: %s", right);
+          length = rbrace-start;
+          finish = rbrace+1;
+        }
+        else
+        {
+          length = str_skip(start, isname);
+          finish = &start[length];
+        }
+
+        compile(OP_LIT)->ptr = substr(left, 0, right-left+(length ? 0:1));
+
+        left = finish;
+
+        if (length)
+        {
+          parse(start, RESULTS_FIRST, PARSE_GREEDY);
+          process(pop(), 0, 0);
+        }
+
+        compile(OP_CONCAT);
+      }
+
+      compile(OP_LIT)->ptr = substr(left, 0, strlen(left));
+
+      compile(OP_CONCAT);
+      discard(expr->item);
+    }
+    else
+    {
+      compile(OP_LIT)->ptr = expr->item;
+    }
 
     if (flag_index)
       compile(flag_assign ? OP_SET: OP_GET);
   }
   else
+  // inline opcode
   if (expr->type == EXPR_OPCODE)
   {
     if (expr->args)
@@ -858,8 +960,11 @@ process (expr_t *expr, int flags, int index)
     }
   }
   else
+  // a built-in function-like keyword with arguments
   if (expr->type == EXPR_BUILTIN)
   {
+    ensure(!expr->keys && !expr->vals);
+
     compile(OP_MARK);
 
     if (expr->args)
@@ -869,23 +974,32 @@ process (expr_t *expr, int flags, int index)
     compile(OP_LIMIT)->offset = expr->results;
   }
   else
+  // if expression (returns a value for ternary style)
   if (expr->type == EXPR_IF)
   {
+    ensure(expr->vals);
+
+    // conditions
     if (expr->args)
       process(expr->args, 0, 0);
 
+    // if false, jump to else/end
     code_t *jump = compile(OP_JFALSE);
     compile(OP_DROP);
 
+    // success block
     if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
       process(vec_get(expr->vals, i)[0], 0, 0);
 
+    // optional failure block
     if (expr->keys && expr->keys->count)
     {
+      // jump success path past failure block
       code_t *jump2 = compile(OP_JMP);
       jump->offset = code_count;
       compile(OP_DROP);
 
+      // failure block
       for (int i = 0; i < expr->keys->count; i++)
         process(vec_get(expr->keys, i)[0], 0, 0);
 
@@ -897,58 +1011,69 @@ process (expr_t *expr, int flags, int index)
     }
   }
   else
+  // while ... do ... end
   if (expr->type == EXPR_WHILE)
   {
+    ensure(expr->vals);
+
     code_t *loop = compile(OP_LOOP);
     int begin = code_count;
 
+    // condition(s)
     if (expr->args)
       process(expr->args, 0, 0);
 
+    // if false, jump to end
     code_t *jump = compile(OP_JFALSE);
     compile(OP_DROP);
 
+    // do ... end
     if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
       process(vec_get(expr->vals, i)[0], 0, 0);
 
+    // clean up
     compile(OP_JMP)->offset = begin;
     jump->offset = code_count;
     compile(OP_DROP);
-
     loop->offset = code_count;
     compile(OP_UNLOOP);
   }
   else
+  // for ... in ... do ... end
   if (expr->type == EXPR_FOR)
   {
     code_t *loop = compile(OP_LOOP);
 
+    // the iterable
     if (expr->args)
       process(expr->args, 0, 0);
 
+    // loop counter
     compile(OP_LIT)->ptr = to_int(0);
 
     int begin = code_count;
 
     code_t *jump = compile(OP_FOR);
+    // OP_FOR expects a vector with key[,val] variable names
     jump->ptr = expr->keys;
     expr->keys = NULL;
 
+    // do block
     if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
       process(vec_get(expr->vals, i)[0], 0, 0);
 
+    // clean up
     compile(OP_JMP)->offset = begin;
     jump->offset = code_count;
     compile(OP_DROP);
-
     loop->offset = code_count;
     compile(OP_UNLOOP);
   }
   else
+  // function with optional name assignment
   if (expr->type == EXPR_FUNCTION)
   {
-    if (expr->args)
-      process(expr->args, 0, 0);
+    ensure(!expr->args);
 
     compile(OP_MARK);
     code_t *entry = compile(OP_LIT);
@@ -969,6 +1094,8 @@ process (expr_t *expr, int flags, int index)
     if (expr->vals) for (int i = 0; i < expr->vals->count; i++)
       process(vec_get(expr->vals, i)[0], 0, 0);
 
+    // if an explicit return expression is used, these instructions
+    // will be dead code
     compile(OP_REPLY);
     compile(OP_RETURN);
     jump->offset = code_count;
@@ -976,6 +1103,7 @@ process (expr_t *expr, int flags, int index)
     compile(OP_LIMIT)->offset = 1;
   }
   else
+  // return 0 or more values
   if (expr->type == EXPR_RETURN)
   {
     compile(OP_REPLY);
@@ -986,6 +1114,7 @@ process (expr_t *expr, int flags, int index)
     compile(OP_RETURN);
   }
   else
+  // literal vector [1,2,3]
   if (expr->type == EXPR_VEC)
   {
     compile(OP_MARK);
@@ -997,6 +1126,7 @@ process (expr_t *expr, int flags, int index)
     compile(OP_LIMIT)->offset = 1;
   }
   else
+  // literal map { a = 1, b = 2, c = nil }
   if (expr->type == EXPR_MAP)
   {
     compile(OP_MARK);
@@ -1019,10 +1149,10 @@ process (expr_t *expr, int flags, int index)
   }
 
   if (expr->chain)
-    process(expr->chain, PROCESS_CHAIN, 0);
+    process(expr->chain, PROCESS_CHAIN | (flag_assign ? PROCESS_ASSIGN: 0), 0);
 
   if (expr->index)
-    process(expr->index, PROCESS_INDEX, 0);
+    process(expr->index, PROCESS_INDEX | (flag_assign ? PROCESS_ASSIGN: 0), 0);
 
   expr_free(expr);
 }

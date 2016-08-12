@@ -195,7 +195,7 @@ map_char (map_t *map)
     {
       push(to_char(node->key));
       op_concat();
-      push(strf(": "));
+      push(strf(" = "));
       op_concat();
 
       if (is_vec(node->val))
