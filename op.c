@@ -174,22 +174,6 @@ op_reply ()
 }
 
 void
-op_break ()
-{
-  routine()->ip = ivec_cell(&routine()->loops, -1)[0];
-  routine()->marks.count = ivec_cell(&routine()->loops, -2)[0];
-  while (depth()) op_drop();
-}
-
-void
-op_continue ()
-{
-  routine()->ip = ivec_cell(&routine()->loops, -1)[0]-1;
-  routine()->marks.count = ivec_cell(&routine()->loops, -2)[0];
-  while (depth()) op_drop();
-}
-
-void
 op_lit ()
 {
   push(copy(code[routine()->ip-1].ptr));
@@ -275,6 +259,22 @@ op_limit ()
     while (req_depth < stack()->count) op_drop();
     while (req_depth > stack()->count) push(NULL);
   }
+}
+
+void
+op_break ()
+{
+  routine()->ip = ivec_cell(&routine()->loops, -1)[0];
+  routine()->marks.count = ivec_cell(&routine()->loops, -2)[0];
+  while (depth()) op_drop();
+}
+
+void
+op_continue ()
+{
+  routine()->ip = ivec_cell(&routine()->loops, -1)[0]-1;
+  routine()->marks.count = ivec_cell(&routine()->loops, -2)[0];
+  while (depth()) op_drop();
 }
 
 void

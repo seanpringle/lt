@@ -1019,6 +1019,7 @@ process (expr_t *expr, int flags, int index)
   {
     ensure(expr->vals);
 
+    compile(OP_MARK);
     code_t *loop = compile(OP_LOOP);
     int begin = code_count;
 
@@ -1037,15 +1038,15 @@ process (expr_t *expr, int flags, int index)
     // clean up
     compile(OP_JMP)->offset = begin;
     jump->offset = code_count;
-    compile(OP_DROP);
     loop->offset = code_count;
     compile(OP_UNLOOP);
+    compile(OP_LIMIT);
   }
   else
   // for ... in ... do ... end
   if (expr->type == EXPR_FOR)
   {
-    code_t *loop = compile(OP_LOOP);
+    compile(OP_MARK);
 
     // the iterable
     if (expr->args)
@@ -1053,6 +1054,9 @@ process (expr_t *expr, int flags, int index)
 
     // loop counter
     compile(OP_LIT)->ptr = to_int(0);
+
+    compile(OP_MARK);
+    code_t *loop = compile(OP_LOOP);
 
     int begin = code_count;
 
@@ -1068,9 +1072,10 @@ process (expr_t *expr, int flags, int index)
     // clean up
     compile(OP_JMP)->offset = begin;
     jump->offset = code_count;
-    compile(OP_DROP);
     loop->offset = code_count;
     compile(OP_UNLOOP);
+    compile(OP_LIMIT);
+    compile(OP_LIMIT);
   }
   else
   // function with optional name assignment
